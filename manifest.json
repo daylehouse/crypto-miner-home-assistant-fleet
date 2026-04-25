@@ -1,6 +1,6 @@
 {
   "domain": "axeos",
-  "name": "Bitaxe/NerdAxe Miner",
+  "name": "Bitaxe/NerdAxe/Avalon Miner",
   "codeowners": ["@daylehouse"],
   "config_flow": true,
   "documentation": "https://github.com/daylehouse/crypto-miner-home-assistant-fleet",
@@ -12,5 +12,5 @@
   "issue_tracker": "https://github.com/daylehouse/crypto-miner-home-assistant-fleet/issues",
   "loggers": ["custom_components.axeos"],
   "requirements": ["aiohttp>=3.8.0"],
-  "version": "1.0.0"
+  "version": "1.1.0"
 }

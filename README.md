@@ -1,13 +1,13 @@
-# Bitaxe/NerdAxe Miner Home Assistant Integration
+# Bitaxe/NerdAxe/Avalon Miner Home Assistant Integration
 
-Home Assistant integration for monitoring and managing Bitaxe and NerdAxe ASIC miners running AxeOS.
+Home Assistant integration for monitoring and managing Bitaxe, NerdAxe, and Avalon ASIC miners.
 
-Version 1.0.0 adds fleet monitoring, pool-aware fleet counts, per-miner overheat thresholds, and local brand assets for the config flow.
+Version 1.1.0 adds Avalon support aligned to the same pool/sensor/fleet model used for Bitaxe/NerdAxe.
 
 ## Features
 
 - Config flow setup for miner entries and a standalone fleet entry
-- Support for Bitaxe and NerdAxe devices using the same AxeOS API
+- Support for Bitaxe, NerdAxe, and Avalon devices
 - Per-miner monitoring for hashrate, power, temperatures, uptime, shares, pool details, firmware, and more
 - Restart button and pool configuration service
 - Fleet-wide sensors for hashrate, power, efficiency, online/offline counts, and pool activity
@@ -22,7 +22,7 @@ Version 1.0.0 adds fleet monitoring, pool-aware fleet counts, per-miner overheat
 
 1. Open HACS in Home Assistant.
 2. Add this repository as a custom integration repository.
-3. Install `Bitaxe/NerdAxe Miner`.
+3. Install `Bitaxe/NerdAxe/Avalon Miner`.
 4. Restart Home Assistant.
 
 ### Manual
@@ -30,13 +30,13 @@ Version 1.0.0 adds fleet monitoring, pool-aware fleet counts, per-miner overheat
 1. Copy this integration to `/config/custom_components/axeos/`.
 2. Restart Home Assistant.
 3. Go to Settings > Devices & Services > Add Integration.
-4. Search for `Bitaxe/NerdAxe Miner`.
+4. Search for `Bitaxe/NerdAxe/Avalon Miner`.
 
 ## Configuration
 
 The config flow supports two entry types:
 
-- Miner: Adds a single Bitaxe or NerdAxe device
+- Miner: Adds a single Bitaxe, NerdAxe, or Avalon device
 - Fleet: Adds an aggregate fleet device with cross-miner sensors
 
 Each miner should be added as its own config entry. After miner entries are configured, add one fleet entry to expose the fleet sensors.
@@ -102,6 +102,7 @@ This returns a list of miner hostnames currently above their configured overheat
 
 - Bitaxe models supported by the AxeOS API
 - NerdAxe models using the same API structure
+- Avalon models exposing CGMiner-compatible API on port 4028 (for example Nano series)
 
 ## Notes
 

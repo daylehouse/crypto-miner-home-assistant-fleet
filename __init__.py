@@ -86,7 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Create API client
     session = async_get_clientsession(hass)
-    api_client = BitaxeAPIClient(host, session)
+    api_client = BitaxeAPIClient(host, session, miner_type=miner_type)
 
     # Create coordinator with 30-second update interval
     coordinator = BitaxeDataUpdateCoordinator(

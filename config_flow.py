@@ -27,6 +27,7 @@ from .const import (
     ERROR_INVALID_HOST,
     ERROR_UNKNOWN,
     MINER_TYPE_BITAXE,
+    MINER_TYPE_AVALON,
     MINER_TYPE_NERDAXE,
 )
 from .utils import normalize_identifier
@@ -92,7 +93,9 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return normalize_identifier(host)
 
     async def _async_validate_and_fetch_info(
-        self, host: str
+        self,
+        host: str,
+        miner_type: Optional[str] = None,
     ) -> tuple[Optional[str], Optional[dict[str, Any]]]:
         """Validate host connectivity and return (error, system_info)."""
         if not host or not isinstance(host, str) or host.startswith("http"):
@@ -100,7 +103,11 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             session = async_get_clientsession(self.hass)
-            client = BitaxeAPIClient(host, session)
+            client = BitaxeAPIClient(
+                host,
+                session,
+                miner_type=miner_type or getattr(self, "miner_type", MINER_TYPE_BITAXE),
+            )
             info = await client.get_system_info(timeout=CONNECTION_TIMEOUT)
             if not isinstance(info, dict):
                 return ERROR_UNKNOWN, None
@@ -317,7 +324,7 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self.miner_type = user_input[CONF_MINER_TYPE]
             host = self._normalize_host(user_input.get(CONF_HOST, ""))
-            error, info = await self._async_validate_and_fetch_info(host)
+            error, info = await self._async_validate_and_fetch_info(host, self.miner_type)
             if error:
                 errors["base"] = error
             else:
@@ -359,6 +366,7 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         {
                             MINER_TYPE_BITAXE: "Bitaxe",
                             MINER_TYPE_NERDAXE: "NerdAxe",
+                            MINER_TYPE_AVALON: "Avalon",
                         }
                     ),
                     vol.Required(CONF_HOST): str,
@@ -375,7 +383,7 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             host = self._normalize_host(user_input.get(CONF_HOST, ""))
-            error, info = await self._async_validate_and_fetch_info(host)
+            error, info = await self._async_validate_and_fetch_info(host, self.miner_type)
             if error:
                 errors["base"] = error
             else:
@@ -466,7 +474,7 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             miner_type = user_input[CONF_MINER_TYPE]
             host = self._normalize_host(user_input[CONF_HOST])
-            error, info = await self._async_validate_and_fetch_info(host)
+            error, info = await self._async_validate_and_fetch_info(host, miner_type)
             if error:
                 return self.async_show_form(
                     step_id="reconfigure",
@@ -476,6 +484,7 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 {
                                     MINER_TYPE_BITAXE: "Bitaxe",
                                     MINER_TYPE_NERDAXE: "NerdAxe",
+                                    MINER_TYPE_AVALON: "Avalon",
                                 }
                             ),
                             vol.Required(CONF_HOST, default=host): str,
@@ -512,6 +521,7 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         {
                             MINER_TYPE_BITAXE: "Bitaxe",
                             MINER_TYPE_NERDAXE: "NerdAxe",
+                            MINER_TYPE_AVALON: "Avalon",
                         }
                     ),
                     vol.Required(CONF_HOST, default=current_host): str,

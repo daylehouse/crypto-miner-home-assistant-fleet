@@ -10,7 +10,7 @@
       },
       "miner": {
         "title": "Miner Setup",
-        "description": "Choose the miner type and enter the miner IP address.",
+        "description": "Choose the miner type (Bitaxe, NerdAxe, or Avalon) and enter the miner IP address.",
         "data": {
           "miner_type": "Choose Miner Type",
           "host": "Enter Miner IP Address"
@@ -70,7 +70,7 @@
   "services": {
     "set_pool": {
       "name": "Set Pool Settings",
-      "description": "Update the stratum pool settings on a Bitaxe/NerdAxe miner.",
+      "description": "Update the stratum pool settings on a miner.",
       "fields": {
         "device_id": {
           "name": "Device ID",

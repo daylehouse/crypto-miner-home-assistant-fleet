@@ -1,7 +1,7 @@
 """Constants for the Bitaxe/NerdAxe integration."""
 
 DOMAIN = "axeos"
-NAME = "Bitaxe/NerdAxe Miner"
+NAME = "Bitaxe/NerdAxe/Avalon Miner"
 PLATFORMS_MINER = ["sensor", "button", "switch", "select", "number"]
 PLATFORMS_FLEET = ["sensor"]
 PLATFORMS = PLATFORMS_MINER
@@ -9,7 +9,8 @@ PLATFORMS = PLATFORMS_MINER
 # Miner types
 MINER_TYPE_BITAXE = "bitaxe"
 MINER_TYPE_NERDAXE = "nerdaxe"
-MINER_TYPES = [MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE]
+MINER_TYPE_AVALON = "avalon"
+MINER_TYPES = [MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE, MINER_TYPE_AVALON]
 
 # Config entry keys
 CONF_HOST = "host"
