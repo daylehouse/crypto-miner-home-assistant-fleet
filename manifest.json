@@ -1,0 +1,16 @@
+{
+  "domain": "axeos",
+  "name": "Bitaxe/NerdAxe Miner",
+  "codeowners": ["@daylehouse"],
+  "config_flow": true,
+  "documentation": "https://github.com/daylehouse/crypto-miner-home-assistant-fleet",
+  "homeassistant": {
+    "min_version": "2024.1.0"
+  },
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/daylehouse/crypto-miner-home-assistant-fleet/issues",
+  "loggers": ["custom_components.axeos"],
+  "requirements": ["aiohttp>=3.8.0"],
+  "version": "1.0.0"
+}

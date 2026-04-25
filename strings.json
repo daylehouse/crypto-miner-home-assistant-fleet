@@ -1,0 +1,98 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Setup Type",
+        "menu_options": {
+          "miner": "Add Miner",
+          "fleet": "Add Fleet Dashboard"
+        }
+      },
+      "miner": {
+        "title": "Miner Setup",
+        "description": "Choose the miner type and enter the miner IP address.",
+        "data": {
+          "miner_type": "Choose Miner Type",
+          "host": "Enter Miner IP Address"
+        }
+      },
+      "host": {
+        "title": "Miner Details",
+        "description": "Enter the IP address or hostname of your {miner_type}.",
+        "data": {
+          "host": "Host (IP or hostname)"
+        }
+      },
+      "pools": {
+        "title": "Pool Profiles",
+        "description": "Optional: configure up to three pool profiles for {device_name}. Leave fields blank to skip a profile.\n\nEnter only the base username in each Pool User field. The integration automatically appends .{miner_hostname} when saving (final format: username.{miner_hostname}).",
+        "data": {
+          "pool1_name": "Pool 1 Name",
+          "pool1_url": "Pool 1 Stratum URL",
+          "pool1_port": "Pool 1 Port",
+          "pool1_user": "Pool 1 User (without .hostname)",
+          "pool1_password": "Pool 1 Password",
+          "pool2_name": "Pool 2 Name",
+          "pool2_url": "Pool 2 Stratum URL",
+          "pool2_port": "Pool 2 Port",
+          "pool2_user": "Pool 2 User (without .hostname)",
+          "pool2_password": "Pool 2 Password",
+          "pool3_name": "Pool 3 Name",
+          "pool3_url": "Pool 3 Stratum URL",
+          "pool3_port": "Pool 3 Port",
+          "pool3_user": "Pool 3 User (without .hostname)",
+          "pool3_password": "Pool 3 Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Miner",
+        "description": "Update miner type and host for this existing entry.",
+        "data": {
+          "miner_type": "Miner Type",
+          "host": "Host (IP or hostname)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the miner. Check the IP address and ensure the miner is powered on.",
+      "connection_timeout": "Connection timed out. The miner may be unreachable or taking too long to respond.",
+      "invalid_host": "Invalid host address. Please enter a valid IP address or hostname.",
+      "invalid_pool": "Each configured pool must include URL, port, user, and password.",
+      "unknown": "An unexpected error occurred. Please try again."
+    },
+    "abort": {
+      "already_configured": "This miner is already configured.",
+      "fleet_already_configured": "A Fleet dashboard entry is already configured.",
+      "reconfigure_not_supported": "Fleet entry reconfiguration is not supported.",
+      "reconfigure_successful": "Miner configuration updated successfully."
+    }
+  },
+  "services": {
+    "set_pool": {
+      "name": "Set Pool Settings",
+      "description": "Update the stratum pool settings on a Bitaxe/NerdAxe miner.",
+      "fields": {
+        "device_id": {
+          "name": "Device ID",
+          "description": "The IP address or hostname of the miner"
+        },
+        "stratum_url": {
+          "name": "Stratum URL",
+          "description": "Stratum server URL (e.g., stratum+tcp://public-pool.io)"
+        },
+        "stratum_port": {
+          "name": "Stratum Port",
+          "description": "Stratum server port (1-65535)"
+        },
+        "stratum_user": {
+          "name": "Stratum User",
+          "description": "Username for the pool (usually Bitcoin wallet address)"
+        },
+        "stratum_password": {
+          "name": "Stratum Password",
+          "description": "Password for the pool (usually 'x')"
+        }
+      }
+    }
+  }
+}

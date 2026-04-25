@@ -1,0 +1,41 @@
+set_pool:
+  name: Set Pool Settings
+  description: Update the stratum pool settings on a Bitaxe/NerdAxe miner
+  fields:
+    device_id:
+      name: Device ID
+      description: The device identifier (host/IP) of the miner
+      example: "192.168.3.199"
+      required: true
+      selector:
+        text:
+    stratum_url:
+      name: Stratum URL
+      description: Stratum server URL (e.g., "stratum+tcp://pool.example.com")
+      example: "stratum+tcp://public-pool.io"
+      required: true
+      selector:
+        text:
+    stratum_port:
+      name: Stratum Port
+      description: Stratum server port (1-65535)
+      example: 21496
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 65535
+    stratum_user:
+      name: Stratum User
+      description: Stratum username (usually Bitcoin wallet address)
+      example: "bc1q..."
+      required: true
+      selector:
+        text:
+    stratum_password:
+      name: Stratum Password
+      description: Stratum password (usually "x")
+      example: "x"
+      required: true
+      selector:
+        text:
