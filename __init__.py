@@ -16,12 +16,15 @@ from .const import (
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
     CONF_POOLS,
+    CONF_AVALON_USERNAME,
+    CONF_AVALON_PASSWORD,
     DOMAIN,
     ENTRY_TYPE_FLEET,
     ENTRY_TYPE_MINER,
     OVERHEAT_THRESHOLD_DEFAULT_C,
     PLATFORMS_FLEET,
     PLATFORMS_MINER,
+    overheat_threshold_profile,
 )
 from .coordinator import BitaxeDataUpdateCoordinator
 from .services import async_register_services, async_unregister_services
@@ -86,7 +89,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Create API client
     session = async_get_clientsession(hass)
-    api_client = BitaxeAPIClient(host, session, miner_type=miner_type)
+    
+    # Extract Avalon credentials if available
+    avalon_username = entry.data.get(CONF_AVALON_USERNAME, "admin")
+    avalon_password = entry.data.get(CONF_AVALON_PASSWORD, "admin")
+    
+    api_client = BitaxeAPIClient(
+        host,
+        session,
+        miner_type=miner_type,
+        avalon_web_user=avalon_username,
+        avalon_web_password=avalon_password,
+    )
 
     # Create coordinator with 30-second update interval
     coordinator = BitaxeDataUpdateCoordinator(
@@ -129,8 +143,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     # Store coordinator, API client, and host for service lookups
+    _, _, threshold_default = overheat_threshold_profile(miner_type)
     hass.data[DOMAIN][entry.entry_id] = {
         "entry_type": ENTRY_TYPE_MINER,
+        "miner_type": miner_type,
         "coordinator": coordinator,
         "api_client": api_client,
         "host": host,
@@ -140,7 +156,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_OVERHEAT_THRESHOLD_C: float(
             entry.options.get(
                 CONF_OVERHEAT_THRESHOLD_C,
-                OVERHEAT_THRESHOLD_DEFAULT_C,
+                threshold_default,
             )
         ),
     }

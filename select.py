@@ -2,6 +2,7 @@
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
@@ -16,26 +17,44 @@ from .const import (
     CONF_HOST,
     CONF_MINER_TYPE,
     CONF_POOLS,
+    CONF_AVALON_USERNAME,
+    CONF_AVALON_PASSWORD,
     DOMAIN,
+    MINER_TYPE_AVALON,
 )
 from .coordinator import BitaxeDataUpdateCoordinator
 from .utils import normalize_identifier
 
 _LOGGER = logging.getLogger(__name__)
 
+AVALON_WORK_MODES = {
+    "Low": 0,
+    "Mid": 1,
+    "High": 2,
+}
+AVALON_REVERSE_WORK_MODES = {value: key for key, value in AVALON_WORK_MODES.items()}
+
 
 def _normalize_pool_url(value: Any) -> str | None:
-    """Normalize pool URL for reliable comparison across API variants."""
+    """Normalize pool URL to hostname for reliable comparison across API variants."""
     if value is None:
         return None
-    url = str(value).strip().lower()
-    if not url:
+
+    raw_url = str(value).strip().lower()
+    if not raw_url:
         return None
+
+    parsed = urlparse(raw_url if "://" in raw_url else f"stratum+tcp://{raw_url}")
+    if parsed.hostname:
+        return parsed.hostname.lower()
+
+    normalized = raw_url
     for prefix in ("stratum+tcp://", "stratum+ssl://", "stratum://"):
-        if url.startswith(prefix):
-            url = url[len(prefix) :]
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix) :]
             break
-    return url.rstrip("/")
+
+    return normalized.split("/", 1)[0].split(":", 1)[0].rstrip("/") or None
 
 
 def _normalize_pool_user(value: Any) -> str | None:
@@ -106,8 +125,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up select entities for Bitaxe/NerdAxe."""
     pools = config_entry.data.get(CONF_POOLS, [])
-    if not pools:
-        return
 
     coordinator: BitaxeDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id][
         "coordinator"
@@ -119,9 +136,15 @@ async def async_setup_entry(
         CONF_DEVICE_NAME, f"{miner_type.capitalize()} {host}"
     )
     device_slug = config_entry.data.get(CONF_DEVICE_SLUG, normalize_identifier(host))
+    
+    # Extract Avalon credentials if available
+    avalon_username = config_entry.data.get(CONF_AVALON_USERNAME)
+    avalon_password = config_entry.data.get(CONF_AVALON_PASSWORD)
 
-    async_add_entities(
-        [
+    entities: list[SelectEntity] = []
+
+    if pools:
+        entities.append(
             BitaxePoolSelectEntity(
                 coordinator,
                 api_client,
@@ -129,9 +152,73 @@ async def async_setup_entry(
                 device_name,
                 device_slug,
                 pools,
+                avalon_username=avalon_username,
+                avalon_password=avalon_password,
             )
-        ]
-    )
+        )
+
+    if miner_type == MINER_TYPE_AVALON:
+        entities.append(
+            AvalonWorkModeSelectEntity(
+                coordinator,
+                api_client,
+                device_name,
+                device_slug,
+            )
+        )
+
+    if not entities:
+        return
+
+    async_add_entities(entities)
+
+
+class AvalonWorkModeSelectEntity(CoordinatorEntity, SelectEntity):
+    """Select Avalon mining work mode."""
+
+    _attr_has_entity_name = True
+    _attr_options = list(AVALON_WORK_MODES.keys())
+
+    def __init__(
+        self,
+        coordinator: BitaxeDataUpdateCoordinator,
+        api_client: Any,
+        device_name: str,
+        device_slug: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._api_client = api_client
+        self._device_name = device_name
+        self._device_slug = device_slug
+        self._attr_name = "Work Mode"
+        self._attr_unique_id = f"avalon_{device_slug}_work_mode"
+        self._attr_icon = "mdi:tune-variant"
+        self._attr_entity_category = EntityCategory.CONFIG
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"avalon_{device_slug}")},
+            "name": self._device_name,
+            "manufacturer": "Canaan",
+            "model": "Avalon",
+        }
+
+    @property
+    def current_option(self) -> str:
+        """Return current Avalon work mode."""
+        info = self.coordinator.data.get("info", {}) if self.coordinator.data else {}
+        workmode = info.get("workModeLevel")
+        try:
+            return AVALON_REVERSE_WORK_MODES[int(workmode)]
+        except (TypeError, ValueError, KeyError):
+            return "Low"
+
+    async def async_select_option(self, option: str) -> None:
+        """Set Avalon work mode and refresh data."""
+        level = AVALON_WORK_MODES.get(option)
+        if level is None:
+            raise ValueError(f"Unknown Avalon work mode: {option}")
+
+        await self._api_client.set_workmode(level)
+        await self.coordinator.async_request_refresh()
 
 
 class BitaxePoolSelectEntity(CoordinatorEntity, SelectEntity):
@@ -147,6 +234,8 @@ class BitaxePoolSelectEntity(CoordinatorEntity, SelectEntity):
         device_name: str,
         device_slug: str,
         pools: list[dict[str, Any]],
+        avalon_username: str | None = None,
+        avalon_password: str | None = None,
     ) -> None:
         """Initialize pool profile selector."""
         super().__init__(coordinator)
@@ -154,6 +243,8 @@ class BitaxePoolSelectEntity(CoordinatorEntity, SelectEntity):
         self._miner_type = miner_type
         self._device_name = device_name
         self._device_slug = device_slug
+        self._avalon_username = avalon_username
+        self._avalon_password = avalon_password
 
         option_names: list[str] = []
         self._pool_by_option: dict[str, dict[str, Any]] = {}
@@ -230,6 +321,8 @@ class BitaxePoolSelectEntity(CoordinatorEntity, SelectEntity):
             stratum_port=pool["stratum_port"],
             stratum_user=pool["stratum_user"],
             stratum_password=pool["stratum_password"],
+            avalon_username=self._avalon_username,
+            avalon_password=self._avalon_password,
         )
 
         _LOGGER.info(

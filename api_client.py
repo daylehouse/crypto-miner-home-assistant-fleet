@@ -122,6 +122,24 @@ class BitaxeAPIClient:
             _LOGGER.error(f"Failed to restart system: {e}")
             raise
 
+    async def set_workmode(
+        self,
+        level: int,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Set Avalon work mode using the CGMiner ascset command."""
+        if self.miner_type != MINER_TYPE_AVALON:
+            raise ValueError(f"Unsupported miner type for work mode: {self.miner_type}")
+
+        result = await self._avalon_command(
+            "ascset",
+            f"0,workmode,set,{int(level)}",
+            timeout=timeout,
+        )
+        if not result.get("success"):
+            raise ConnectionError(result.get("message", "Avalon workmode update failed"))
+        return result
+
     async def set_pool_settings(
         self,
         stratum_url: str,
@@ -129,6 +147,8 @@ class BitaxeAPIClient:
         stratum_user: str,
         stratum_password: str,
         timeout: Optional[float] = None,
+        avalon_username: Optional[str] = None,
+        avalon_password: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Update pool settings via PATCH /api/system.
 
@@ -138,6 +158,8 @@ class BitaxeAPIClient:
             stratum_user: Stratum username (usually wallet address)
             stratum_password: Stratum password (usually 'x')
             timeout: Request timeout in seconds
+            avalon_username: Avalon miner admin username (overrides stored credentials)
+            avalon_password: Avalon miner admin password (overrides stored credentials)
 
         Returns:
             Updated system info from response
@@ -163,12 +185,16 @@ class BitaxeAPIClient:
             )
 
         if self.miner_type == MINER_TYPE_AVALON:
+            # Use provided credentials if available, otherwise fall back to stored ones
+            web_user = avalon_username or self._avalon_web_user
+            web_password = avalon_password or self._avalon_web_password
+
             url_with_port = str(stratum_url).strip()
             if ":" not in url_with_port.rsplit("/", 1)[-1]:
                 url_with_port = f"{url_with_port}:{int(stratum_port)}"
 
             raw_param = (
-                f"{self._avalon_web_user},{self._avalon_web_password},0,"
+                f"{web_user},{web_password},0,"
                 f"{url_with_port},{stratum_user},{stratum_password}"
             )
             result = await self._avalon_command("setpool", raw_param, timeout=timeout)
@@ -184,24 +210,37 @@ class BitaxeAPIClient:
     async def _avalon_system_info(self, timeout: float) -> Dict[str, Any]:
         """Fetch and normalize Avalon runtime data to axeos info schema."""
         summary_task = asyncio.create_task(self._avalon_command("summary", timeout=timeout))
+        stats_task = asyncio.create_task(self._avalon_command("stats", timeout=timeout))
+        devs_task = asyncio.create_task(self._avalon_command("devs", timeout=timeout))
         pools_task = asyncio.create_task(self._avalon_command("pools", timeout=timeout))
         estats_task = asyncio.create_task(self._avalon_command("estats", timeout=timeout))
         version_task = asyncio.create_task(self._avalon_command("version", timeout=timeout))
 
         results = await asyncio.gather(
             summary_task,
+            stats_task,
+            devs_task,
             pools_task,
             estats_task,
             version_task,
             return_exceptions=True,
         )
 
-        summary_result, pools_result, estats_result, version_result = results
+        (
+            summary_result,
+            stats_result,
+            devs_result,
+            pools_result,
+            estats_result,
+            version_result,
+        ) = results
         for result in results:
             if isinstance(result, Exception):
                 raise result
 
         summary = summary_result.get("sections", {}).get("SUMMARY", [{}])[0]
+        stats_sections = stats_result.get("sections", {})
+        devs_sections = devs_result.get("sections", {})
         pools = pools_result.get("sections", {}).get("POOL", [])
         estats = estats_result.get("estats", {})
         version = version_result.get("sections", {}).get("VERSION", [{}])[0]
@@ -214,6 +253,11 @@ class BitaxeAPIClient:
             estats = {}
         if not isinstance(version, dict):
             version = {}
+
+        if not isinstance(stats_sections, dict):
+            stats_sections = {}
+        if not isinstance(devs_sections, dict):
+            devs_sections = {}
 
         active_pool: dict[str, Any] | None = None
         for pool in pools:
@@ -253,6 +297,42 @@ class BitaxeAPIClient:
         ps = estats.get("PS") if isinstance(estats.get("PS"), dict) else {}
         temps = estats.get("temperatures") if isinstance(estats.get("temperatures"), dict) else {}
         fans = estats.get("fans") if isinstance(estats.get("fans"), dict) else {}
+        misc = estats.get("misc") if isinstance(estats.get("misc"), dict) else {}
+        workmode = estats.get("WORKMODE")
+
+        hashboard_voltage = (
+            ps.get("PS_HashboardVoltage")
+            or misc.get("hashboard_voltage")
+            or misc.get("HashboardVoltage")
+        )
+        block_height = (
+            active_pool.get("Current Block Height") if isinstance(active_pool, dict) else None
+        ) or misc.get("P1 Block Height") or misc.get("Block Height")
+        frequency_mhz = self._avalon_find_numeric_value(
+            ("freq", "frequency", "frequencymhz", "clock", "asicfreq"),
+            misc,
+            temps,
+            version,
+            stats_sections,
+            devs_sections,
+            summary,
+        )
+        mac_address = self._avalon_find_mac_address(
+            misc,
+            version,
+            stats_sections,
+            devs_sections,
+            summary,
+            active_pool or {},
+        )
+        chip_type = self._avalon_find_chip_type(
+            version,
+            devs_sections,
+            stats_sections,
+            misc,
+            summary,
+        )
+        hostname = self._avalon_find_hostname(misc, version, stats_sections, devs_sections) or self.host
 
         hashrate_gh = 0.0
         try:
@@ -266,7 +346,10 @@ class BitaxeAPIClient:
             "hashRate_10m": round(hashrate_gh, 3),
             "hashRate_1h": round(hashrate_gh, 3),
             "power": ps.get("PS_Power") or 0,
+            "coreVoltageActual": hashboard_voltage,
+            "frequency": frequency_mhz,
             "temp": temps.get("TMax") or temps.get("MTmax") or temps.get("OTemp") or 0,
+            "exhaustTemp": temps.get("OTemp"),
             "vrTemp": temps.get("TAvg") or temps.get("MTavg"),
             "fanspeed": fans.get("FanR") or 0,
             "fanrpm": fans.get("Fan1"),
@@ -275,17 +358,263 @@ class BitaxeAPIClient:
             "errorPercentage": summary.get("Device Rejected%") or 0,
             "bestDiff": summary.get("Best Share"),
             "bestSessionDiff": summary.get("Best Share"),
+            "blockHeight": block_height,
+            "currentBlockHeight": block_height,
             "poolDifficulty": pool_diff,
             "stratumURL": pool_url,
             "stratumPort": pool_port,
             "stratumUser": pool_user,
-            "hostname": self.host,
+            "hostname": hostname,
+            "macAddr": mac_address,
             "version": version.get("CGMiner") or version.get("LVERSION") or "Avalon",
-            "ASICModel": version.get("MODEL") or "Avalon",
+            "ASICModel": chip_type,
+            "workModeLevel": workmode,
             "uptimeSeconds": summary.get("Elapsed") or 0,
             "stratum": {"pools": pools},
         }
         return info
+
+    def _avalon_find_chip_type(self, *payloads: Any) -> str:
+        """Return the best available Avalon chip type for ASIC model reporting."""
+        preferred_keys = {
+            "chip",
+            "chiptype",
+            "chipmodel",
+            "asictype",
+            "asics",
+            "asicchip",
+            "asicmodel",
+        }
+        fallback_keys = {
+            "model",
+            "devicename",
+            "devmodel",
+            "machinetype",
+        }
+
+        def normalize_key(value: Any) -> str:
+            return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+        def map_known_chip_type(text: str) -> str:
+            normalized = normalize_key(text)
+            known_mappings = {
+                "avalonnano3s": "A3197S",
+                "nano3s": "A3197S",
+                "avalonnano": "A3197S",
+            }
+            return known_mappings.get(normalized, text)
+
+        def normalize_value(value: Any) -> str | None:
+            text = str(value).strip()
+            if not text:
+                return None
+            if len(text) > 120:
+                return None
+            return map_known_chip_type(text)
+
+        def visit(node: Any, candidate_keys: set[str]) -> str | None:
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if normalize_key(key) in candidate_keys:
+                        normalized = normalize_value(value)
+                        if normalized:
+                            return normalized
+                for value in node.values():
+                    normalized = visit(value, candidate_keys)
+                    if normalized:
+                        return normalized
+                return None
+
+            if isinstance(node, list):
+                for item in node:
+                    normalized = visit(item, candidate_keys)
+                    if normalized:
+                        return normalized
+                return None
+
+            return None
+
+        for payload in payloads:
+            chip_type = visit(payload, preferred_keys)
+            if chip_type:
+                return chip_type
+
+        for payload in payloads:
+            chip_type = visit(payload, fallback_keys)
+            if chip_type:
+                return chip_type
+
+        return "Avalon"
+
+    def _avalon_find_mac_address(self, *payloads: Any) -> str | None:
+        """Return first MAC-like value found anywhere in Avalon payloads."""
+        preferred_keys = {
+            "mac",
+            "macaddress",
+            "mac_address",
+            "macaddr",
+            "ethaddr",
+            "ethernetmac",
+            "ethernet_mac",
+            "lanmac",
+            "lan_mac",
+            "wifi_mac",
+            "wifimac",
+        }
+
+        def normalize_key(value: Any) -> str:
+            return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+        def normalize_mac(value: Any) -> str | None:
+            text = str(value).strip()
+            if not text:
+                return None
+            hex_only = re.sub(r"[^0-9A-Fa-f]", "", text)
+            if len(hex_only) == 12:
+                return ":".join(hex_only[i : i + 2] for i in range(0, 12, 2)).lower()
+            match = re.search(r"([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}", text)
+            if match:
+                return match.group(0).replace("-", ":").lower()
+            return None
+
+        def visit(node: Any) -> str | None:
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if normalize_key(key) in preferred_keys:
+                        normalized = normalize_mac(value)
+                        if normalized:
+                            return normalized
+                for value in node.values():
+                    normalized = visit(value)
+                    if normalized:
+                        return normalized
+                return None
+
+            if isinstance(node, list):
+                for item in node:
+                    normalized = visit(item)
+                    if normalized:
+                        return normalized
+                return None
+
+            return normalize_mac(node)
+
+        for payload in payloads:
+            normalized = visit(payload)
+            if normalized:
+                return normalized
+        return None
+
+    def _avalon_find_hostname(self, *payloads: Any) -> str | None:
+        """Return first hostname-like value found in Avalon payloads."""
+        preferred_keys = {
+            "hostname",
+            "host",
+            "devicename",
+            "device_name",
+            "devname",
+            "name",
+            "device_id",
+            "deviceid",
+            "boardid",
+            "board_id",
+        }
+
+        def normalize_key(value: Any) -> str:
+            return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+        def is_hostname_like(value: Any) -> bool:
+            text = str(value).strip()
+            if not text or len(text) > 255:
+                return False
+            return bool(re.match(r"^[a-zA-Z0-9._-]+$", text))
+
+        def visit(node: Any) -> str | None:
+            if isinstance(node, dict):
+                # Check preferred keys first
+                for key, value in node.items():
+                    if normalize_key(key) in preferred_keys and is_hostname_like(value):
+                        return str(value).strip()
+                # Fallback to any string-like value
+                for value in node.values():
+                    result = visit(value)
+                    if result:
+                        return result
+                return None
+
+            if isinstance(node, list):
+                for item in node:
+                    result = visit(item)
+                    if result:
+                        return result
+                return None
+
+            return None
+
+        for payload in payloads:
+            result = visit(payload)
+            if result:
+                return result
+        return None
+
+    def _avalon_find_numeric_value(
+        self, preferred_keys: tuple[str, ...], *payloads: Any
+    ) -> int | float | None:
+        """Return first numeric-like value found for the given normalized keys."""
+
+        normalized_keys = {re.sub(r"[^a-z0-9]", "", key.lower()) for key in preferred_keys}
+
+        def convert_numeric(value: Any) -> int | float | None:
+            if isinstance(value, bool):
+                return None
+            if isinstance(value, (int, float)):
+                return value
+
+            text = str(value).strip()
+            if not text:
+                return None
+
+            match = re.search(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
+            if not match:
+                return None
+
+            number_text = match.group(0)
+            try:
+                return int(number_text)
+            except ValueError:
+                try:
+                    return float(number_text)
+                except ValueError:
+                    return None
+
+        def visit(node: Any) -> int | float | None:
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    normalized_key = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                    if normalized_key in normalized_keys:
+                        numeric = convert_numeric(value)
+                        if numeric is not None:
+                            return numeric
+                for value in node.values():
+                    numeric = visit(value)
+                    if numeric is not None:
+                        return numeric
+                return None
+
+            if isinstance(node, list):
+                for item in node:
+                    numeric = visit(item)
+                    if numeric is not None:
+                        return numeric
+                return None
+
+            return None
+
+        for payload in payloads:
+            numeric = visit(payload)
+            if numeric is not None:
+                return numeric
+        return None
 
     async def _avalon_asic_info(self, timeout: float) -> Dict[str, Any]:
         """Fetch and normalize Avalon static/device details."""
@@ -408,6 +737,8 @@ class BitaxeAPIClient:
                         "PS_CurrentOutput": self._avalon_convert_value(parts[5]),
                         "PS_Power": self._avalon_convert_value(parts[6]),
                     }
+            elif key == "WORKMODE":
+                out["WORKMODE"] = self._avalon_convert_value(val)
             else:
                 out["misc"][key] = val
         return out

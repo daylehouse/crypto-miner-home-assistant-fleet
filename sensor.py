@@ -4,6 +4,7 @@ import logging
 import ipaddress
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -37,6 +38,7 @@ from .const import (
     DOMAIN,
     ENTRY_TYPE_FLEET,
     ENTRY_TYPE_MINER,
+    MINER_TYPE_AVALON,
     OVERHEAT_THRESHOLD_DEFAULT_C,
 )
 from .coordinator import BitaxeDataUpdateCoordinator
@@ -46,17 +48,25 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _normalize_pool_url(value: Any) -> str | None:
-    """Normalize pool URL for reliable comparison."""
+    """Normalize pool URL to hostname for reliable comparison."""
     if value is None:
         return None
-    url = str(value).strip().lower()
-    if not url:
+
+    raw_url = str(value).strip().lower()
+    if not raw_url:
         return None
+
+    parsed = urlparse(raw_url if "://" in raw_url else f"stratum+tcp://{raw_url}")
+    if parsed.hostname:
+        return parsed.hostname.lower()
+
+    normalized = raw_url
     for prefix in ("stratum+tcp://", "stratum+ssl://", "stratum://"):
-        if url.startswith(prefix):
-            url = url[len(prefix) :]
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix) :]
             break
-    return url.rstrip("/")
+
+    return normalized.split("/", 1)[0].split(":", 1)[0].rstrip("/") or None
 
 
 def _normalize_pool_user(value: Any) -> str | None:
@@ -237,6 +247,21 @@ def _first_pool_numeric(info: dict[str, Any], *keys: str) -> Any:
     return _numeric_recursive_first_present(first_pool, *keys)
 
 
+def _overheat_source_temp_c(miner_type: str, info: dict[str, Any]) -> float | None:
+    """Return temperature source for overheat checks by miner type.
+
+    Avalon miners should use VR temperature, while Bitaxe/NerdAxe use ASIC temp.
+    """
+    try:
+        if miner_type == MINER_TYPE_AVALON:
+            raw = info.get("vrTemp")
+            return float(raw) if raw is not None else None
+        raw = info.get("temp")
+        return float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _cleanup_fleet_entities_for_entry(hass: HomeAssistant, entry_id: str) -> None:
     """Remove stale fleet sensor entities bound to a specific config entry."""
     entity_registry = er.async_get(hass)
@@ -245,6 +270,20 @@ def _cleanup_fleet_entities_for_entry(hass: HomeAssistant, entry_id: str) -> Non
             continue
         unique_id = registry_entry.unique_id or ""
         if unique_id.startswith(f"{DOMAIN}_fleet_"):
+            entity_registry.async_remove(registry_entry.entity_id)
+
+
+def _cleanup_avalon_unsupported_entities_for_entry(
+    hass: HomeAssistant,
+    entry_id: str,
+) -> None:
+    """Remove stale Avalon-only unsupported entities for a config entry."""
+    entity_registry = er.async_get(hass)
+    for registry_entry in er.async_entries_for_config_entry(entity_registry, entry_id):
+        if registry_entry.domain != "sensor":
+            continue
+        unique_id = registry_entry.unique_id or ""
+        if unique_id.endswith("_core_voltage_set"):
             entity_registry.async_remove(registry_entry.entity_id)
 
 
@@ -259,6 +298,7 @@ SENSOR_ICONS: dict[str, str] = {
     "voltage": "mdi:sine-wave",
     "current": "mdi:current-ac",
     "temp_asic": "mdi:thermometer",
+    "temp_exhaust": "mdi:thermometer-chevron-down",
     "temp_vr": "mdi:thermometer-lines",
     "core_voltage_set": "mdi:tune-vertical",
     "core_voltage_actual": "mdi:lightning-bolt",
@@ -369,6 +409,15 @@ BITAXE_SENSORS: list[BitaxeSensorEntityDescription] = [
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         value_fn=lambda data: round(data.get("info", {}).get("temp", 0), 2),
+    ),
+    BitaxeSensorEntityDescription(
+        key="temp_exhaust",
+        name="Exhaust Temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get("info", {}).get("exhaustTemp"),
     ),
     BitaxeSensorEntityDescription(
         key="overheated",
@@ -555,7 +604,7 @@ BITAXE_SENSORS: list[BitaxeSensorEntityDescription] = [
     ),
     BitaxeSensorEntityDescription(
         key="axeos_version",
-        name="AxeOS Version",
+        name="OS Version",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda data: _first_present(
             data.get("info", {}),
@@ -709,6 +758,9 @@ async def async_setup_entry(
     )
     device_slug = config_entry.data.get(CONF_DEVICE_SLUG, normalize_identifier(host))
 
+    if miner_type == MINER_TYPE_AVALON:
+        _cleanup_avalon_unsupported_entities_for_entry(hass, config_entry.entry_id)
+
     entities = [
         BitaxeSensorEntity(
             coordinator,
@@ -720,6 +772,14 @@ async def async_setup_entry(
             sensor_description,
         )
         for sensor_description in BITAXE_SENSORS
+        if not (
+            miner_type == MINER_TYPE_AVALON
+            and sensor_description.key == "core_voltage_set"
+        )
+        if not (
+            miner_type != MINER_TYPE_AVALON
+            and sensor_description.key == "temp_exhaust"
+        )
     ]
 
     async_add_entities(entities)
@@ -833,9 +893,13 @@ class BitaxeFleetSensorEntity(SensorEntity):
             if not isinstance(info, dict):
                 continue
 
-            try:
-                temp_c = float(info.get("temp") or 0)
-            except (TypeError, ValueError):
+            miner_type = str(
+                entry_data.get("miner_type")
+                or getattr(coordinator, "miner_type", "")
+                or ""
+            ).strip().lower()
+            temp_c = _overheat_source_temp_c(miner_type, info)
+            if temp_c is None:
                 continue
 
             threshold = float(
@@ -923,9 +987,14 @@ class BitaxeFleetSensorEntity(SensorEntity):
                 info = coordinator.data.get("info", {}) if coordinator.data else {}
                 if not isinstance(info, dict):
                     continue
-                try:
-                    temp_c = float(info.get("temp") or 0)
-                except (TypeError, ValueError):
+
+                miner_type = str(
+                    entry_data.get("miner_type")
+                    or getattr(coordinator, "miner_type", "")
+                    or ""
+                ).strip().lower()
+                temp_c = _overheat_source_temp_c(miner_type, info)
+                if temp_c is None:
                     continue
                 threshold = float(
                     entry_data.get(
@@ -1004,9 +1073,8 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
             if not isinstance(info, dict):
                 return 0
 
-            try:
-                temp_c = float(info.get("temp") or 0)
-            except (TypeError, ValueError):
+            temp_c = _overheat_source_temp_c(self._miner_type, info)
+            if temp_c is None:
                 return 0
 
             runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})

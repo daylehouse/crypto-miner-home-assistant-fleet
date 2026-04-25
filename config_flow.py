@@ -18,6 +18,8 @@ from .const import (
     CONF_HOST,
     CONF_MINER_TYPE,
     CONF_POOLS,
+    CONF_AVALON_USERNAME,
+    CONF_AVALON_PASSWORD,
     CONNECTION_TIMEOUT,
     DOMAIN,
     ENTRY_TYPE_FLEET,
@@ -440,12 +442,17 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
 
+            # Store pools in pending data
+            self._pending_data[CONF_POOLS] = pools
+
+            # For Avalon miners, ask for credentials before creating entry
+            if self._pending_data.get(CONF_MINER_TYPE) == MINER_TYPE_AVALON:
+                return await self.async_step_avalon_credentials()
+
+            # For other miners, create the entry directly
             return self.async_create_entry(
                 title=self._pending_data[CONF_DEVICE_NAME],
-                data={
-                    **self._pending_data,
-                    CONF_POOLS: pools,
-                },
+                data=self._pending_data,
             )
 
         return self.async_show_form(
@@ -454,6 +461,40 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "device_name": self._pending_data.get(CONF_DEVICE_NAME, "Miner"),
                 "miner_hostname": str(self._pending_info.get("hostname") or self._pending_data.get(CONF_DEVICE_SLUG, "")).strip(),
+            },
+        )
+
+    async def async_step_avalon_credentials(
+        self, user_input: Optional[dict[str, Any]] = None
+    ) -> FlowResult:
+        """Ask for Avalon miner credentials (admin username/password)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            username = str(user_input.get(CONF_AVALON_USERNAME, "")).strip()
+            password = str(user_input.get(CONF_AVALON_PASSWORD, "")).strip()
+
+            if not username or not password:
+                errors["base"] = "invalid_credentials"
+            else:
+                # Store credentials in pending data and create entry
+                self._pending_data[CONF_AVALON_USERNAME] = username
+                self._pending_data[CONF_AVALON_PASSWORD] = password
+
+                return self.async_create_entry(
+                    title=self._pending_data[CONF_DEVICE_NAME],
+                    data=self._pending_data,
+                )
+
+        return self.async_show_form(
+            step_id="avalon_credentials",
+            data_schema=vol.Schema({
+                vol.Required(CONF_AVALON_USERNAME, default="admin"): str,
+                vol.Required(CONF_AVALON_PASSWORD): str,
+            }),
+            errors=errors,
+            description_placeholders={
+                "device_name": self._pending_data.get(CONF_DEVICE_NAME, "Avalon Miner"),
             },
         )
 

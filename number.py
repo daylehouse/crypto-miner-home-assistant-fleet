@@ -15,9 +15,7 @@ from .const import (
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
     DOMAIN,
-    OVERHEAT_THRESHOLD_DEFAULT_C,
-    OVERHEAT_THRESHOLD_MAX_C,
-    OVERHEAT_THRESHOLD_MIN_C,
+    overheat_threshold_profile,
 )
 from .utils import normalize_identifier
 
@@ -35,10 +33,11 @@ async def async_setup_entry(
     )
     device_slug = config_entry.data.get(CONF_DEVICE_SLUG, normalize_identifier(host))
 
+    min_value, max_value, default_value = overheat_threshold_profile(miner_type)
     current_value = float(
         config_entry.options.get(
             CONF_OVERHEAT_THRESHOLD_C,
-            OVERHEAT_THRESHOLD_DEFAULT_C,
+            default_value,
         )
     )
 
@@ -51,6 +50,8 @@ async def async_setup_entry(
                 device_name,
                 device_slug,
                 current_value,
+                min_value,
+                max_value,
             )
         ]
     )
@@ -62,8 +63,6 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
     _attr_has_entity_name = True
     _attr_name = "Overheat Alert Threshold"
     _attr_mode = NumberMode.SLIDER
-    _attr_native_min_value = OVERHEAT_THRESHOLD_MIN_C
-    _attr_native_max_value = OVERHEAT_THRESHOLD_MAX_C
     _attr_native_step = 1.0
     _attr_native_unit_of_measurement = "°C"
     _attr_entity_category = EntityCategory.CONFIG
@@ -77,6 +76,8 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
         device_name: str,
         device_slug: str,
         current_value: float,
+        min_value: float,
+        max_value: float,
     ) -> None:
         """Initialize the threshold number entity."""
         self.hass = hass
@@ -85,7 +86,11 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
         self._miner_type = miner_type
         self._device_name = device_name
         self._device_slug = device_slug
-        self._attr_native_value = float(current_value)
+        self._attr_native_min_value = float(min_value)
+        self._attr_native_max_value = float(max_value)
+        self._attr_native_value = float(
+            max(self._attr_native_min_value, min(self._attr_native_max_value, current_value))
+        )
         self._attr_unique_id = f"{miner_type}_{self._device_slug}_{CONF_OVERHEAT_THRESHOLD_C}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"{miner_type}_{self._device_slug}")},
