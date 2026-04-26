@@ -761,6 +761,7 @@ async def async_setup_entry(
     if miner_type == MINER_TYPE_AVALON:
         _cleanup_avalon_unsupported_entities_for_entry(hass, config_entry.entry_id)
 
+
     entities = [
         BitaxeSensorEntity(
             coordinator,
@@ -773,12 +774,12 @@ async def async_setup_entry(
         )
         for sensor_description in BITAXE_SENSORS
         if not (
-            miner_type == MINER_TYPE_AVALON
-            and sensor_description.key == "core_voltage_set"
+            miner_type == MINER_TYPE_AVALON and sensor_description.key in [
+                "core_voltage_set", "voltage", "current", "free_heap"
+            ]
         )
         if not (
-            miner_type != MINER_TYPE_AVALON
-            and sensor_description.key == "temp_exhaust"
+            miner_type != MINER_TYPE_AVALON and sensor_description.key == "temp_exhaust"
         )
     ]
 
