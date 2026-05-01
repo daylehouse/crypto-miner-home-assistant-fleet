@@ -28,6 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CONF_ASIC_OVERHEAT_THRESHOLD_C,
     CONF_DEVICE_NAME,
     CONF_DEVICE_SLUG,
     CONF_ENTRY_TYPE,
@@ -35,11 +36,12 @@ from .const import (
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
     CONF_POOLS,
+    CONF_VR_OVERHEAT_THRESHOLD_C,
     DOMAIN,
     ENTRY_TYPE_FLEET,
     ENTRY_TYPE_MINER,
     MINER_TYPE_AVALON,
-    OVERHEAT_THRESHOLD_DEFAULT_C,
+    overheat_threshold_profile,
 )
 from .coordinator import BitaxeDataUpdateCoordinator
 from .utils import normalize_identifier
@@ -247,19 +249,28 @@ def _first_pool_numeric(info: dict[str, Any], *keys: str) -> Any:
     return _numeric_recursive_first_present(first_pool, *keys)
 
 
-def _overheat_source_temp_c(miner_type: str, info: dict[str, Any]) -> float | None:
-    """Return temperature source for overheat checks by miner type.
-
-    Avalon miners should use VR temperature, while Bitaxe/NerdAxe use ASIC temp.
-    """
+def _asic_temp_c(info: dict[str, Any]) -> float | None:
+    """Return ASIC temperature in Celsius when available."""
     try:
-        if miner_type == MINER_TYPE_AVALON:
-            raw = info.get("vrTemp")
-            return float(raw) if raw is not None else None
         raw = info.get("temp")
         return float(raw) if raw is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _vr_temp_c(info: dict[str, Any]) -> float | None:
+    """Return VR temperature in Celsius when available."""
+    try:
+        raw = info.get("vrTemp")
+        return float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _default_overheat_threshold_c(miner_type: str) -> float:
+    """Return default overheat threshold for miner type."""
+    _, _, threshold_default = overheat_threshold_profile(miner_type)
+    return float(threshold_default)
 
 
 def _cleanup_fleet_entities_for_entry(hass: HomeAssistant, entry_id: str) -> None:
@@ -289,7 +300,8 @@ def _cleanup_avalon_unsupported_entities_for_entry(
 
 SENSOR_ICONS: dict[str, str] = {
     "mining_active": "mdi:pickaxe",
-    "overheated": "mdi:thermometer-alert",
+    "overheated": "mdi:chip",
+    "vr_overheated": "mdi:thermometer-lines",
     "hashrate": "mdi:speedometer",
     "hashrate_1m": "mdi:speedometer-medium",
     "hashrate_10m": "mdi:speedometer-slow",
@@ -421,7 +433,7 @@ BITAXE_SENSORS: list[BitaxeSensorEntityDescription] = [
     ),
     BitaxeSensorEntityDescription(
         key="overheated",
-        name="Overheated",
+        name="ASIC Overheated",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     BitaxeSensorEntityDescription(
@@ -432,6 +444,11 @@ BITAXE_SENSORS: list[BitaxeSensorEntityDescription] = [
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda data: data.get("info", {}).get("vrTemp"),
+    ),
+    BitaxeSensorEntityDescription(
+        key="vr_overheated",
+        name="VR Overheated",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     # Chip voltage
     BitaxeSensorEntityDescription(
@@ -714,8 +731,20 @@ async def async_setup_entry(
                 "TH/W",
             ),
             BitaxeFleetSensorEntity(hass, "fleet_miners_total", "Fleet Miners Configured"),
+            BitaxeFleetSensorEntity(hass, "fleet_miners_active", "Fleet Miners Active"),
+            BitaxeFleetSensorEntity(hass, "fleet_miners_inactive", "Fleet Miners Inactive"),
             BitaxeFleetSensorEntity(hass, "fleet_miners_online", "Fleet Miners Online"),
             BitaxeFleetSensorEntity(hass, "fleet_miners_offline", "Fleet Miners Offline"),
+            BitaxeFleetSensorEntity(
+                hass,
+                "fleet_miners_asic_overheated",
+                "Fleet Miners ASIC Overheated",
+            ),
+            BitaxeFleetSensorEntity(
+                hass,
+                "fleet_miners_vr_overheated",
+                "Fleet Miners VR Overheated",
+            ),
             BitaxeFleetSensorEntity(
                 hass,
                 "fleet_miners_overheated",
@@ -810,8 +839,12 @@ class BitaxeFleetSensorEntity(SensorEntity):
             "fleet_energy_efficiency": "mdi:gauge",
             "fleet_hashrate_per_watt": "mdi:lightning-bolt-circle",
             "fleet_miners_total": "mdi:server",
+            "fleet_miners_active": "mdi:account-group",
+            "fleet_miners_inactive": "mdi:account-group-outline",
             "fleet_miners_online": "mdi:account-hard-hat",
             "fleet_miners_offline": "mdi:account-hard-hat-outline",
+            "fleet_miners_asic_overheated": "mdi:chip",
+            "fleet_miners_vr_overheated": "mdi:thermometer-lines",
             "fleet_miners_overheated": "mdi:thermometer-alert",
             "fleet_online_percentage": "mdi:sack-percent",
             "fleet_miners_unknown_pool": "mdi:help-network-outline",
@@ -854,6 +887,23 @@ class BitaxeFleetSensorEntity(SensorEntity):
             and entry_data["coordinator"].last_update_success
         ]
 
+    def _active_mining_entries(self) -> list[dict[str, Any]]:
+        """Return online miners that are currently mining (hashrate > 0)."""
+        active_entries: list[dict[str, Any]] = []
+        for entry_data in self._online_entries():
+            coordinator = entry_data.get("coordinator")
+            if not isinstance(coordinator, BitaxeDataUpdateCoordinator):
+                continue
+            info = coordinator.data.get("info", {}) if coordinator.data else {}
+            if not isinstance(info, dict):
+                continue
+            try:
+                if float(info.get("hashRate") or 0) > 0:
+                    active_entries.append(entry_data)
+            except (TypeError, ValueError):
+                continue
+        return active_entries
+
     def _pool_active_counts(self) -> dict[str, int]:
         """Return active miner count per configured pool name."""
         counts: dict[str, int] = {}
@@ -882,8 +932,8 @@ class BitaxeFleetSensorEntity(SensorEntity):
 
         return counts
 
-    def _overheated_miner_hostnames(self) -> list[str]:
-        """Return hostnames for online miners above their configured threshold."""
+    def _overheated_miner_hostnames(self, temp_source: str) -> list[str]:
+        """Return hostnames for online miners above threshold for a temp source."""
         hostnames: list[str] = []
         for entry_data in self._online_entries():
             coordinator = entry_data.get("coordinator")
@@ -899,16 +949,30 @@ class BitaxeFleetSensorEntity(SensorEntity):
                 or getattr(coordinator, "miner_type", "")
                 or ""
             ).strip().lower()
-            temp_c = _overheat_source_temp_c(miner_type, info)
+            threshold_default = _default_overheat_threshold_c(miner_type)
+
+            if temp_source == "asic":
+                temp_c = _asic_temp_c(info)
+                threshold = float(
+                    entry_data.get(
+                        CONF_ASIC_OVERHEAT_THRESHOLD_C,
+                        entry_data.get(
+                            CONF_OVERHEAT_THRESHOLD_C,
+                            threshold_default,
+                        ),
+                    )
+                )
+            else:
+                temp_c = _vr_temp_c(info)
+                threshold = float(
+                    entry_data.get(
+                        CONF_VR_OVERHEAT_THRESHOLD_C,
+                        threshold_default,
+                    )
+                )
+
             if temp_c is None:
                 continue
-
-            threshold = float(
-                entry_data.get(
-                    CONF_OVERHEAT_THRESHOLD_C,
-                    OVERHEAT_THRESHOLD_DEFAULT_C,
-                )
-            )
             if temp_c < threshold:
                 continue
 
@@ -923,8 +987,18 @@ class BitaxeFleetSensorEntity(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return extra attributes for fleet sensors."""
+        if self._key == "fleet_miners_asic_overheated":
+            return {"overheated_miner_hostnames": self._overheated_miner_hostnames("asic")}
+        if self._key == "fleet_miners_vr_overheated":
+            return {"overheated_miner_hostnames": self._overheated_miner_hostnames("vr")}
         if self._key == "fleet_miners_overheated":
-            return {"overheated_miner_hostnames": self._overheated_miner_hostnames()}
+            asic_hostnames = self._overheated_miner_hostnames("asic")
+            vr_hostnames = self._overheated_miner_hostnames("vr")
+            return {
+                "overheated_miner_hostnames": sorted(set(asic_hostnames + vr_hostnames)),
+                "asic_overheated_miner_hostnames": asic_hostnames,
+                "vr_overheated_miner_hostnames": vr_hostnames,
+            }
         return None
 
     @property
@@ -932,6 +1006,7 @@ class BitaxeFleetSensorEntity(SensorEntity):
         """Return fleet sensor value."""
         entries = self._fleet_entries()
         online_entries = self._online_entries()
+        active_mining_entries = self._active_mining_entries()
 
         total_hashrate_gh = 0.0
         total_power_w = 0.0
@@ -973,39 +1048,28 @@ class BitaxeFleetSensorEntity(SensorEntity):
         if self._key == "fleet_miners_total":
             return len(self._configured_miner_entries())
 
+        if self._key == "fleet_miners_active":
+            return len(active_mining_entries)
+
+        if self._key == "fleet_miners_inactive":
+            return max(len(self._configured_miner_entries()) - len(active_mining_entries), 0)
+
         if self._key == "fleet_miners_online":
             return len(online_entries)
 
         if self._key == "fleet_miners_offline":
             return max(len(self._configured_miner_entries()) - len(online_entries), 0)
 
-        if self._key == "fleet_miners_overheated":
-            overheated_count = 0
-            for entry_data in online_entries:
-                coordinator = entry_data.get("coordinator")
-                if not isinstance(coordinator, BitaxeDataUpdateCoordinator):
-                    continue
-                info = coordinator.data.get("info", {}) if coordinator.data else {}
-                if not isinstance(info, dict):
-                    continue
+        if self._key == "fleet_miners_asic_overheated":
+            return len(self._overheated_miner_hostnames("asic"))
 
-                miner_type = str(
-                    entry_data.get("miner_type")
-                    or getattr(coordinator, "miner_type", "")
-                    or ""
-                ).strip().lower()
-                temp_c = _overheat_source_temp_c(miner_type, info)
-                if temp_c is None:
-                    continue
-                threshold = float(
-                    entry_data.get(
-                        CONF_OVERHEAT_THRESHOLD_C,
-                        OVERHEAT_THRESHOLD_DEFAULT_C,
-                    )
-                )
-                if temp_c >= threshold:
-                    overheated_count += 1
-            return overheated_count
+        if self._key == "fleet_miners_vr_overheated":
+            return len(self._overheated_miner_hostnames("vr"))
+
+        if self._key == "fleet_miners_overheated":
+            asic_hostnames = self._overheated_miner_hostnames("asic")
+            vr_hostnames = self._overheated_miner_hostnames("vr")
+            return len(set(asic_hostnames + vr_hostnames))
 
         if self._key == "fleet_online_percentage":
             total = len(self._configured_miner_entries())
@@ -1066,7 +1130,7 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> Optional[Any]:
         """Return the state of the sensor."""
-        if self.entity_description.key == "overheated":
+        if self.entity_description.key in {"overheated", "vr_overheated"}:
             if not self.coordinator.data:
                 return 0
 
@@ -1074,17 +1138,31 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
             if not isinstance(info, dict):
                 return 0
 
-            temp_c = _overheat_source_temp_c(self._miner_type, info)
+            threshold_default = _default_overheat_threshold_c(self._miner_type)
+            runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+
+            if self.entity_description.key == "overheated":
+                temp_c = _asic_temp_c(info)
+                threshold = float(
+                    runtime_entry.get(
+                        CONF_ASIC_OVERHEAT_THRESHOLD_C,
+                        runtime_entry.get(
+                            CONF_OVERHEAT_THRESHOLD_C,
+                            threshold_default,
+                        ),
+                    )
+                )
+            else:
+                temp_c = _vr_temp_c(info)
+                threshold = float(
+                    runtime_entry.get(
+                        CONF_VR_OVERHEAT_THRESHOLD_C,
+                        threshold_default,
+                    )
+                )
+
             if temp_c is None:
                 return 0
-
-            runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-            threshold = float(
-                runtime_entry.get(
-                    CONF_OVERHEAT_THRESHOLD_C,
-                    OVERHEAT_THRESHOLD_DEFAULT_C,
-                )
-            )
             return 1 if temp_c >= threshold else 0
 
         if not self.coordinator.data or not self.entity_description.value_fn:

@@ -19,7 +19,10 @@ CONF_DEVICE_NAME = "device_name"
 CONF_DEVICE_SLUG = "device_slug"
 CONF_POOLS = "pools"
 CONF_ENTRY_TYPE = "entry_type"
+# Legacy ASIC threshold key (kept for backward compatibility)
 CONF_OVERHEAT_THRESHOLD_C = "overheat_threshold_c"
+CONF_ASIC_OVERHEAT_THRESHOLD_C = "asic_overheat_threshold_c"
+CONF_VR_OVERHEAT_THRESHOLD_C = "vr_overheat_threshold_c"
 CONF_AVALON_USERNAME = "avalon_username"
 CONF_AVALON_PASSWORD = "avalon_password"
 

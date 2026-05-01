@@ -266,7 +266,9 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             user = str(user_input.get(f"pool{idx}_user", "")).strip()
             password = str(user_input.get(f"pool{idx}_password", "")).strip()
 
-            if not any([name, url, port, user, password]):
+            # Treat profiles as empty unless non-port fields were provided.
+            # This keeps pool2/pool3 optional even when port has a default value.
+            if not any([name, url, user, password]):
                 continue
 
             if not all([url, user, password]) or not isinstance(port, int):

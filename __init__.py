@@ -9,6 +9,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api_client import BitaxeAPIClient
 from .const import (
+    CONF_ASIC_OVERHEAT_THRESHOLD_C,
     CONF_DEVICE_NAME,
     CONF_DEVICE_SLUG,
     CONF_ENTRY_TYPE,
@@ -16,12 +17,12 @@ from .const import (
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
     CONF_POOLS,
+    CONF_VR_OVERHEAT_THRESHOLD_C,
     CONF_AVALON_USERNAME,
     CONF_AVALON_PASSWORD,
     DOMAIN,
     ENTRY_TYPE_FLEET,
     ENTRY_TYPE_MINER,
-    OVERHEAT_THRESHOLD_DEFAULT_C,
     PLATFORMS_FLEET,
     PLATFORMS_MINER,
     overheat_threshold_profile,
@@ -144,6 +145,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Store coordinator, API client, and host for service lookups
     _, _, threshold_default = overheat_threshold_profile(miner_type)
+    asic_threshold = float(
+        entry.options.get(
+            CONF_ASIC_OVERHEAT_THRESHOLD_C,
+            entry.options.get(
+                CONF_OVERHEAT_THRESHOLD_C,
+                threshold_default,
+            ),
+        )
+    )
+    vr_threshold = float(
+        entry.options.get(
+            CONF_VR_OVERHEAT_THRESHOLD_C,
+            threshold_default,
+        )
+    )
     hass.data[DOMAIN][entry.entry_id] = {
         "entry_type": ENTRY_TYPE_MINER,
         "miner_type": miner_type,
@@ -153,12 +169,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_name": entry.data.get(CONF_DEVICE_NAME, device_name),
         "device_slug": entry.data.get(CONF_DEVICE_SLUG, device_slug),
         "pools": entry.data.get(CONF_POOLS, []),
-        CONF_OVERHEAT_THRESHOLD_C: float(
-            entry.options.get(
-                CONF_OVERHEAT_THRESHOLD_C,
-                threshold_default,
-            )
-        ),
+        CONF_OVERHEAT_THRESHOLD_C: asic_threshold,
+        CONF_ASIC_OVERHEAT_THRESHOLD_C: asic_threshold,
+        CONF_VR_OVERHEAT_THRESHOLD_C: vr_threshold,
     }
 
     # Register services (only once per domain)
