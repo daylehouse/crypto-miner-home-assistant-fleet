@@ -32,6 +32,10 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_SLUG,
     CONF_ENTRY_TYPE,
+    CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
+    CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C,
+    CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C,
+    CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C,
     CONF_HOST,
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
@@ -41,6 +45,7 @@ from .const import (
     ENTRY_TYPE_FLEET,
     ENTRY_TYPE_MINER,
     MINER_TYPE_AVALON,
+    MINER_TYPE_GOLDSHELL,
     overheat_threshold_profile,
 )
 from .coordinator import BitaxeDataUpdateCoordinator
@@ -298,10 +303,56 @@ def _cleanup_avalon_unsupported_entities_for_entry(
             entity_registry.async_remove(registry_entry.entity_id)
 
 
+def _cleanup_legacy_goldshell_overheat_entities_for_entry(
+    hass: HomeAssistant,
+    entry_id: str,
+) -> None:
+    """Remove stale Goldshell overheat sensor entities with legacy Temp1/Temp2 keys."""
+    entity_registry = er.async_get(hass)
+    for registry_entry in er.async_entries_for_config_entry(entity_registry, entry_id):
+        if registry_entry.domain != "sensor":
+            continue
+        unique_id = registry_entry.unique_id or ""
+        if unique_id.endswith("_goldshell_temp_1_overheated") or unique_id.endswith(
+            "_goldshell_temp_2_overheated"
+        ):
+            entity_registry.async_remove(registry_entry.entity_id)
+
+
 SENSOR_ICONS: dict[str, str] = {
     "mining_active": "mdi:pickaxe",
     "overheated": "mdi:chip",
     "vr_overheated": "mdi:thermometer-lines",
+    "aleo_overheated": "mdi:thermometer-alert",
+    "ltc_overheated": "mdi:thermometer-alert",
+    "aleo_hashrate": "mdi:speedometer",
+    "ltc_hashrate": "mdi:speedometer",
+    "aleo_power": "mdi:flash",
+    "ltc_power": "mdi:flash",
+    "aleo_temp_1": "mdi:thermometer",
+    "aleo_temp_2": "mdi:thermometer",
+    "ltc_temp_1": "mdi:thermometer",
+    "ltc_temp_2": "mdi:thermometer",
+    "aleo_fan_rpm": "mdi:fan-speed-3",
+    "ltc_fan_rpm": "mdi:fan-speed-3",
+    "aleo_shares_accepted": "mdi:check-circle-outline",
+    "ltc_shares_accepted": "mdi:check-circle-outline",
+    "aleo_shares_rejected": "mdi:close-circle-outline",
+    "ltc_shares_rejected": "mdi:close-circle-outline",
+    "aleo_reject_rate": "mdi:percent-outline",
+    "ltc_reject_rate": "mdi:percent-outline",
+    "aleo_hw_error_rate": "mdi:alert-circle-outline",
+    "ltc_hw_error_rate": "mdi:alert-circle-outline",
+    "aleo_uptime": "mdi:timer-outline",
+    "ltc_uptime": "mdi:timer-outline",
+    "aleo_pool_url": "mdi:server-network",
+    "aleo_pool_port": "mdi:lan-connect",
+    "aleo_pool_user": "mdi:account-outline",
+    "aleo_pool_active": "mdi:check-circle-outline",
+    "ltc_pool_url": "mdi:server-network",
+    "ltc_pool_port": "mdi:lan-connect",
+    "ltc_pool_user": "mdi:account-outline",
+    "ltc_pool_active": "mdi:check-circle-outline",
     "hashrate": "mdi:speedometer",
     "hashrate_1m": "mdi:speedometer-medium",
     "hashrate_10m": "mdi:speedometer-slow",
@@ -688,6 +739,460 @@ BITAXE_SENSORS: list[BitaxeSensorEntityDescription] = [
 ]
 
 
+def _goldshell_get_coin_data(info: dict[str, Any], coin_index: int) -> dict[str, Any]:
+    """Extract Goldshell coin data by index (0=ALEO, 1=LTC) from minfos array."""
+    minfos = info.get("minfos", [])
+    if not isinstance(minfos, list) or coin_index >= len(minfos):
+        return {}
+    device = minfos[coin_index]
+    if not isinstance(device, dict):
+        return {}
+    infos = device.get("infos", [])
+    if not isinstance(infos, list) or not infos:
+        return {}
+    return infos[0] if isinstance(infos[0], dict) else {}
+
+
+def _goldshell_parse_temp(data: dict[str, Any], temp_index: int = 0) -> float | None:
+    """Parse Goldshell temperature (format: "XX°C/YY°C", temp_index: 0 or 1)."""
+    try:
+        temp_str = str(data.get("temp", "")).strip()
+        if not temp_str:
+            return None
+        parts = temp_str.split("/")
+        if temp_index >= len(parts):
+            return None
+        temp_val = float(parts[temp_index].replace("°C", "").strip())
+        return round(temp_val, 2)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _goldshell_parse_fanrpm(data: dict[str, Any]) -> int | None:
+    """Parse Goldshell fan speed (format: "NNrpm")."""
+    try:
+        fan_str = str(data.get("fanspeed", "")).replace("rpm", "").strip()
+        return int(fan_str) if fan_str else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _goldshell_mining_active(payload: dict[str, Any]) -> int:
+    """Return 1 when either Goldshell card has positive hashrate, else 0."""
+    info = payload.get("info", {}) if isinstance(payload, dict) else {}
+    for coin_index in (0, 1):
+        coin_data = _goldshell_get_coin_data(info, coin_index)
+        try:
+            if float(coin_data.get("hashrate", 0) or 0) > 0:
+                return 1
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _goldshell_pool_for_algo(info: dict[str, Any], algo_label: str) -> dict[str, Any]:
+    """Return selected pool dict for an algo label from Goldshell /mcb/pools data."""
+    pools_root = info.get("goldshell_pools", [])
+    if not isinstance(pools_root, list):
+        return {}
+
+    for group in pools_root:
+        if not isinstance(group, dict):
+            continue
+        name = str(group.get("name", "")).upper()
+        if algo_label.upper() not in name:
+            continue
+
+        pools = group.get("pools", [])
+        if not isinstance(pools, list) or not pools:
+            return {}
+
+        for pool in pools:
+            if isinstance(pool, dict) and bool(pool.get("active", False)):
+                return pool
+        return pools[0] if isinstance(pools[0], dict) else {}
+
+    return {}
+
+
+def _goldshell_pool_url(info: dict[str, Any], algo_label: str) -> str:
+    """Return pool URL for a Goldshell algo without port."""
+    raw_url = str(_goldshell_pool_for_algo(info, algo_label).get("url", "") or "").strip()
+    if not raw_url:
+        return ""
+
+    parsed = urlparse(raw_url if "://" in raw_url else f"stratum+tcp://{raw_url}")
+    if parsed.hostname:
+        if parsed.scheme:
+            return f"{parsed.scheme}://{parsed.hostname}"
+        return parsed.hostname
+
+    # Fallback: remove trailing :port from host-like strings.
+    host_part = raw_url.split("/", 1)[0]
+    if ":" in host_part:
+        host_part = host_part.rsplit(":", 1)[0]
+    return host_part
+
+
+def _goldshell_pool_port(info: dict[str, Any], algo_label: str) -> str:
+    """Return pool port for a Goldshell algo by parsing pool URL."""
+    url = str(_goldshell_pool_for_algo(info, algo_label).get("url", "") or "").strip()
+    if not url:
+        return ""
+
+    parsed = urlparse(url if "://" in url else f"stratum+tcp://{url}")
+    if parsed.port is not None:
+        return str(parsed.port)
+
+    raw = url.split("/", 1)[0]
+    if ":" in raw:
+        return raw.rsplit(":", 1)[-1]
+    return ""
+
+
+def _goldshell_pool_user(info: dict[str, Any], algo_label: str) -> str:
+    """Return pool user for a Goldshell algo."""
+    return str(_goldshell_pool_for_algo(info, algo_label).get("user", "") or "")
+
+
+def _goldshell_pool_active(info: dict[str, Any], algo_label: str) -> int:
+    """Return 1 when selected Goldshell algo pool is active, else 0."""
+    pool = _goldshell_pool_for_algo(info, algo_label)
+    return 1 if bool(pool.get("active", False)) else 0
+
+
+def _goldshell_reject_rate_pct(coin_data: dict[str, Any]) -> float:
+    """Return reject rate percentage from accepted/rejected counters."""
+    try:
+        accepted = float(coin_data.get("accepted", 0) or 0)
+        rejected = float(coin_data.get("rejected", 0) or 0)
+        total = accepted + rejected
+        if total <= 0:
+            return 0.0
+        return round((rejected / total) * 100.0, 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _goldshell_hw_error_rate_pct(coin_data: dict[str, Any]) -> float:
+    """Return hardware error percentage from hwerr_ration/rate-like fields."""
+    raw = coin_data.get("hwerr_ration", coin_data.get("hwerr_ratio", 0))
+    try:
+        value = float(raw or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+    # Some firmwares return a ratio (0..1), others return percent-like values.
+    if 0.0 <= value <= 1.0:
+        value *= 100.0
+    return round(value, 2)
+
+
+GOLDSHELL_SENSORS: list[BitaxeSensorEntityDescription] = [
+    BitaxeSensorEntityDescription(
+        key="mining_active",
+        name="Mining Active",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_mining_active(data),
+    ),
+    # ALEO Sensors (coin_index=0)
+    BitaxeSensorEntityDescription(
+        key="aleo_hashrate",
+        name="ALEO Hashrate",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="H/s",
+        value_fn=lambda data: round(
+            float(_goldshell_get_coin_data(data.get("info", {}), 0).get("hashrate", 0)), 2
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_power",
+        name="ALEO Power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=lambda data: round(
+            float(_goldshell_get_coin_data(data.get("info", {}), 0).get("power", 0)), 2
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_temp_1",
+        name="ALEO Temperature 1",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda data: _goldshell_parse_temp(
+            _goldshell_get_coin_data(data.get("info", {}), 0), 0
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_temp_2",
+        name="ALEO Temperature 2",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda data: _goldshell_parse_temp(
+            _goldshell_get_coin_data(data.get("info", {}), 0), 1
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_overheated",
+        name="ALEO Overheated",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_fan_rpm",
+        name="ALEO Fan RPM",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="rpm",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_parse_fanrpm(
+            _goldshell_get_coin_data(data.get("info", {}), 0)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_shares_accepted",
+        name="ALEO Shares Accepted",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: int(
+            _goldshell_get_coin_data(data.get("info", {}), 0).get("accepted", 0)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_shares_rejected",
+        name="ALEO Shares Rejected",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: int(
+            _goldshell_get_coin_data(data.get("info", {}), 0).get("rejected", 0)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_reject_rate",
+        name="ALEO Reject Rate",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_reject_rate_pct(
+            _goldshell_get_coin_data(data.get("info", {}), 0)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_hw_error_rate",
+        name="ALEO HW Error Rate",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_hw_error_rate_pct(
+            _goldshell_get_coin_data(data.get("info", {}), 0)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_uptime",
+        name="ALEO Uptime",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: int(_goldshell_get_coin_data(data.get("info", {}), 0).get("time", 0)),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_pool_url",
+        name="ALEO Pool URL",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_pool_url(data.get("info", {}), "ALEO"),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_pool_port",
+        name="ALEO Pool Port",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_pool_port(data.get("info", {}), "ALEO"),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_pool_user",
+        name="ALEO Pool User",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_pool_user(data.get("info", {}), "ALEO"),
+    ),
+    BitaxeSensorEntityDescription(
+        key="aleo_pool_active",
+        name="ALEO Pool Active",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_pool_active(data.get("info", {}), "ALEO"),
+    ),
+    # LTC Sensors (coin_index=1)
+    BitaxeSensorEntityDescription(
+        key="ltc_hashrate",
+        name="LTC Hashrate",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="MH/s",
+        value_fn=lambda data: round(
+            float(_goldshell_get_coin_data(data.get("info", {}), 1).get("hashrate", 0)), 2
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_power",
+        name="LTC Power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=lambda data: round(
+            float(_goldshell_get_coin_data(data.get("info", {}), 1).get("power", 0)), 2
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_temp_1",
+        name="LTC Temperature 1",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda data: _goldshell_parse_temp(
+            _goldshell_get_coin_data(data.get("info", {}), 1), 0
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_temp_2",
+        name="LTC Temperature 2",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda data: _goldshell_parse_temp(
+            _goldshell_get_coin_data(data.get("info", {}), 1), 1
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_overheated",
+        name="LTC Overheated",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_fan_rpm",
+        name="LTC Fan RPM",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="rpm",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_parse_fanrpm(
+            _goldshell_get_coin_data(data.get("info", {}), 1)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_shares_accepted",
+        name="LTC Shares Accepted",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: int(
+            _goldshell_get_coin_data(data.get("info", {}), 1).get("accepted", 0)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_shares_rejected",
+        name="LTC Shares Rejected",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: int(
+            _goldshell_get_coin_data(data.get("info", {}), 1).get("rejected", 0)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_reject_rate",
+        name="LTC Reject Rate",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_reject_rate_pct(
+            _goldshell_get_coin_data(data.get("info", {}), 1)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_hw_error_rate",
+        name="LTC HW Error Rate",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_hw_error_rate_pct(
+            _goldshell_get_coin_data(data.get("info", {}), 1)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_uptime",
+        name="LTC Uptime",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: int(_goldshell_get_coin_data(data.get("info", {}), 1).get("time", 0)),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_pool_url",
+        name="LTC Pool URL",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_pool_url(data.get("info", {}), "LTC"),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_pool_port",
+        name="LTC Pool Port",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_pool_port(data.get("info", {}), "LTC"),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_pool_user",
+        name="LTC Pool User",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_pool_user(data.get("info", {}), "LTC"),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_pool_active",
+        name="LTC Pool Active",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_pool_active(data.get("info", {}), "LTC"),
+    ),
+    # Device Info Sensors
+    BitaxeSensorEntityDescription(
+        key="firmware_version",
+        name="Firmware Version",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get("info", {}).get("firmware_version", ""),
+    ),
+    BitaxeSensorEntityDescription(
+        key="device_model",
+        name="Device Model",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get("info", {}).get("device_model")
+        or data.get("info", {}).get("ASICModel", ""),
+    ),
+    BitaxeSensorEntityDescription(
+        key="hardware_version",
+        name="Hardware Version",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get("info", {}).get("hardware_version", ""),
+    ),
+    BitaxeSensorEntityDescription(
+        key="mac_address",
+        name="MAC Address",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get("info", {}).get("mac_address", ""),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ipv4_address",
+        name="IPv4 Address",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _recursive_first_present(
+            data.get("info", {}),
+            "ipv4",
+            "hostip",
+            "ip",
+            "ipAddress",
+            "ip_addr",
+            "IPAddress",
+            "wifiIP",
+            "wifiIp",
+            "ip_addr_str",
+        ),
+    ),
+]
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -717,6 +1222,30 @@ async def async_setup_entry(
 
         fleet_entities: list[SensorEntity] = [
             BitaxeFleetSensorEntity(hass, "fleet_hashrate", "Fleet Hashrate", "GH/s"),
+            BitaxeFleetSensorEntity(
+                hass,
+                "fleet_aleo_hashrate",
+                "Fleet ALEO Hashrate",
+                "H/s",
+            ),
+            BitaxeFleetSensorEntity(
+                hass,
+                "fleet_ltc_hashrate",
+                "Fleet LTC Hashrate",
+                "MH/s",
+            ),
+            BitaxeFleetSensorEntity(
+                hass,
+                "fleet_aleo_power",
+                "Fleet ALEO Power",
+                UnitOfPower.WATT,
+            ),
+            BitaxeFleetSensorEntity(
+                hass,
+                "fleet_ltc_power",
+                "Fleet LTC Power",
+                UnitOfPower.WATT,
+            ),
             BitaxeFleetSensorEntity(hass, "fleet_power", "Fleet Power", UnitOfPower.WATT),
             BitaxeFleetSensorEntity(
                 hass,
@@ -759,7 +1288,7 @@ async def async_setup_entry(
             BitaxeFleetSensorEntity(
                 hass,
                 "fleet_miners_unknown_pool",
-                "Fleet Miners Unknown Pool",
+                "Fleet Miners Other Pools",
             ),
         ]
         fleet_entities.extend(
@@ -789,7 +1318,11 @@ async def async_setup_entry(
 
     if miner_type == MINER_TYPE_AVALON:
         _cleanup_avalon_unsupported_entities_for_entry(hass, config_entry.entry_id)
+    if miner_type == MINER_TYPE_GOLDSHELL:
+        _cleanup_legacy_goldshell_overheat_entities_for_entry(hass, config_entry.entry_id)
 
+    # Determine which sensor list to use based on miner type
+    sensor_list = GOLDSHELL_SENSORS if miner_type == MINER_TYPE_GOLDSHELL else BITAXE_SENSORS
 
     entities = [
         BitaxeSensorEntity(
@@ -801,7 +1334,7 @@ async def async_setup_entry(
             device_slug,
             sensor_description,
         )
-        for sensor_description in BITAXE_SENSORS
+        for sensor_description in sensor_list
         if not (
             miner_type == MINER_TYPE_AVALON and sensor_description.key in [
                 "core_voltage_set", "voltage", "current", "free_heap"
@@ -809,6 +1342,11 @@ async def async_setup_entry(
         )
         if not (
             miner_type != MINER_TYPE_AVALON and sensor_description.key == "temp_exhaust"
+        )
+        if not (
+            miner_type == MINER_TYPE_GOLDSHELL and sensor_description.key in [
+                "pool_url", "pool_port", "pool_user", "pool_difficulty"
+            ]
         )
     ]
 
@@ -835,6 +1373,10 @@ class BitaxeFleetSensorEntity(SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{key}"
         self._attr_icon = {
             "fleet_hashrate": "mdi:speedometer",
+            "fleet_aleo_hashrate": "mdi:alpha-a-circle-outline",
+            "fleet_ltc_hashrate": "mdi:alpha-l-circle-outline",
+            "fleet_aleo_power": "mdi:flash-outline",
+            "fleet_ltc_power": "mdi:flash",
             "fleet_power": "mdi:flash",
             "fleet_energy_efficiency": "mdi:gauge",
             "fleet_hashrate_per_watt": "mdi:lightning-bolt-circle",
@@ -891,18 +1433,84 @@ class BitaxeFleetSensorEntity(SensorEntity):
         """Return online miners that are currently mining (hashrate > 0)."""
         active_entries: list[dict[str, Any]] = []
         for entry_data in self._online_entries():
-            coordinator = entry_data.get("coordinator")
-            if not isinstance(coordinator, BitaxeDataUpdateCoordinator):
-                continue
-            info = coordinator.data.get("info", {}) if coordinator.data else {}
-            if not isinstance(info, dict):
-                continue
-            try:
-                if float(info.get("hashRate") or 0) > 0:
-                    active_entries.append(entry_data)
-            except (TypeError, ValueError):
-                continue
+            if self._entry_hashrate_gh(entry_data) > 0:
+                active_entries.append(entry_data)
         return active_entries
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        """Convert value to float when possible."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _entry_hashrate_gh(self, entry_data: dict[str, Any]) -> float:
+        """Return hashrate in GH/s for mixed miner types.
+
+        Bitaxe/NerdAxe/Avalon already expose hashRate in GH/s.
+        Goldshell Byte exposes per-coin rates in different units:
+        - ALEO (index 0): H/s
+        - LTC  (index 1): MH/s
+        """
+        coordinator = entry_data.get("coordinator")
+        if not isinstance(coordinator, BitaxeDataUpdateCoordinator):
+            return 0.0
+
+        info = coordinator.data.get("info", {}) if coordinator.data else {}
+        if not isinstance(info, dict):
+            return 0.0
+
+        miner_type = str(entry_data.get("miner_type") or "").strip().lower()
+        if miner_type != MINER_TYPE_GOLDSHELL:
+            return self._safe_float(info.get("hashRate"))
+
+        minfos = info.get("minfos", [])
+        if not isinstance(minfos, list):
+            return 0.0
+
+        # Goldshell Byte dual-card conversion to GH/s
+        # index 0 (ALEO): H/s -> GH/s, index 1 (LTC): MH/s -> GH/s
+        total_gh = 0.0
+        unit_divisors = {0: 1_000_000_000.0, 1: 1_000.0}
+        for coin_index, divisor in unit_divisors.items():
+            if coin_index >= len(minfos) or not isinstance(minfos[coin_index], dict):
+                continue
+            infos = minfos[coin_index].get("infos", [])
+            if not isinstance(infos, list) or not infos or not isinstance(infos[0], dict):
+                continue
+            total_gh += self._safe_float(infos[0].get("hashrate")) / divisor
+
+        return total_gh
+
+    def _entry_power_w(self, entry_data: dict[str, Any]) -> float:
+        """Return miner power in watts, summing Goldshell dual-card power."""
+        coordinator = entry_data.get("coordinator")
+        if not isinstance(coordinator, BitaxeDataUpdateCoordinator):
+            return 0.0
+
+        info = coordinator.data.get("info", {}) if coordinator.data else {}
+        if not isinstance(info, dict):
+            return 0.0
+
+        miner_type = str(entry_data.get("miner_type") or "").strip().lower()
+        if miner_type != MINER_TYPE_GOLDSHELL:
+            return self._safe_float(info.get("power"))
+
+        minfos = info.get("minfos", [])
+        if not isinstance(minfos, list):
+            return 0.0
+
+        total_power = 0.0
+        for coin_index in (0, 1):
+            if coin_index >= len(minfos) or not isinstance(minfos[coin_index], dict):
+                continue
+            infos = minfos[coin_index].get("infos", [])
+            if not isinstance(infos, list) or not infos or not isinstance(infos[0], dict):
+                continue
+            total_power += self._safe_float(infos[0].get("power"))
+
+        return total_power
 
     def _pool_active_counts(self) -> dict[str, int]:
         """Return active miner count per configured pool name."""
@@ -951,6 +1559,45 @@ class BitaxeFleetSensorEntity(SensorEntity):
             ).strip().lower()
             threshold_default = _default_overheat_threshold_c(miner_type)
 
+            if miner_type == MINER_TYPE_GOLDSHELL:
+                if temp_source != "asic":
+                    continue
+
+                temp1_c = _goldshell_parse_temp(_goldshell_get_coin_data(info, 0), 0)
+                temp2_c = _goldshell_parse_temp(_goldshell_get_coin_data(info, 1), 0)
+                threshold_temp1 = float(
+                    entry_data.get(
+                        CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
+                        entry_data.get(
+                            CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C,
+                            threshold_default,
+                        ),
+                    )
+                )
+                threshold_temp2 = float(
+                    entry_data.get(
+                        CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C,
+                        entry_data.get(
+                            CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C,
+                            threshold_default,
+                        ),
+                    )
+                )
+
+                is_overheated = bool(
+                    (temp1_c is not None and temp1_c >= threshold_temp1)
+                    or (temp2_c is not None and temp2_c >= threshold_temp2)
+                )
+                if not is_overheated:
+                    continue
+
+                hostname = str(info.get("hostname") or "").strip()
+                if not hostname:
+                    hostname = str(entry_data.get("host") or entry_data.get("device_name") or "").strip()
+                if hostname:
+                    hostnames.append(hostname)
+                continue
+
             if temp_source == "asic":
                 temp_c = _asic_temp_c(info)
                 threshold = float(
@@ -987,6 +1634,15 @@ class BitaxeFleetSensorEntity(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return extra attributes for fleet sensors."""
+        if self._key in {"fleet_hashrate", "fleet_energy_efficiency", "fleet_hashrate_per_watt"}:
+            return {
+                "hashrate_basis": "normalized_to_ghs",
+                "hashrate_normalization": {
+                    "bitaxe_nerdaxe_avalon": "hashRate (GH/s)",
+                    "goldshell_aleo": "hashrate (H/s) / 1e9",
+                    "goldshell_ltc": "hashrate (MH/s) / 1e3",
+                },
+            }
         if self._key == "fleet_miners_asic_overheated":
             return {"overheated_miner_hostnames": self._overheated_miner_hostnames("asic")}
         if self._key == "fleet_miners_vr_overheated":
@@ -1010,25 +1666,48 @@ class BitaxeFleetSensorEntity(SensorEntity):
 
         total_hashrate_gh = 0.0
         total_power_w = 0.0
+        total_aleo_hashrate_hs = 0.0
+        total_ltc_hashrate_mhs = 0.0
+        total_aleo_power_w = 0.0
+        total_ltc_power_w = 0.0
         for entry_data in online_entries:
-            coordinator = entry_data.get("coordinator")
-            if not isinstance(coordinator, BitaxeDataUpdateCoordinator):
-                continue
-            info = coordinator.data.get("info", {}) if coordinator.data else {}
-            if not isinstance(info, dict):
-                continue
-            try:
-                total_hashrate_gh += float(info.get("hashRate") or 0)
-            except (TypeError, ValueError):
-                pass
-            try:
-                total_power_w += float(info.get("power") or 0)
-            except (TypeError, ValueError):
-                pass
+            total_hashrate_gh += self._entry_hashrate_gh(entry_data)
+            total_power_w += self._entry_power_w(entry_data)
+
+            miner_type = str(entry_data.get("miner_type") or "").strip().lower()
+            if miner_type == MINER_TYPE_GOLDSHELL:
+                coordinator = entry_data.get("coordinator")
+                if isinstance(coordinator, BitaxeDataUpdateCoordinator):
+                    info = coordinator.data.get("info", {}) if coordinator.data else {}
+                    if isinstance(info, dict):
+                        minfos = info.get("minfos", [])
+                        if isinstance(minfos, list):
+                            if len(minfos) > 0 and isinstance(minfos[0], dict):
+                                infos = minfos[0].get("infos", [])
+                                if isinstance(infos, list) and infos and isinstance(infos[0], dict):
+                                    total_aleo_hashrate_hs += self._safe_float(infos[0].get("hashrate"))
+                                    total_aleo_power_w += self._safe_float(infos[0].get("power"))
+                            if len(minfos) > 1 and isinstance(minfos[1], dict):
+                                infos = minfos[1].get("infos", [])
+                                if isinstance(infos, list) and infos and isinstance(infos[0], dict):
+                                    total_ltc_hashrate_mhs += self._safe_float(infos[0].get("hashrate"))
+                                    total_ltc_power_w += self._safe_float(infos[0].get("power"))
         total_hashrate_th = total_hashrate_gh / 1000.0
 
         if self._key == "fleet_hashrate":
             return round(total_hashrate_gh, 2)
+
+        if self._key == "fleet_aleo_hashrate":
+            return round(total_aleo_hashrate_hs, 2)
+
+        if self._key == "fleet_ltc_hashrate":
+            return round(total_ltc_hashrate_mhs, 2)
+
+        if self._key == "fleet_aleo_power":
+            return round(total_aleo_power_w, 2)
+
+        if self._key == "fleet_ltc_power":
+            return round(total_ltc_power_w, 2)
 
         if self._key == "fleet_power":
             return round(total_power_w, 2)
@@ -1078,8 +1757,13 @@ class BitaxeFleetSensorEntity(SensorEntity):
             return round((len(online_entries) / total) * 100, 2)
 
         if self._key == "fleet_miners_unknown_pool":
+            online_pool_capable = [
+                entry_data
+                for entry_data in online_entries
+                if isinstance(entry_data.get("pools"), list) and len(entry_data.get("pools", [])) > 0
+            ]
             matched_total = sum(self._pool_active_counts().values())
-            return max(len(online_entries) - matched_total, 0)
+            return max(len(online_pool_capable) - matched_total, 0)
 
         if self._key.startswith("fleet_pool_") and self._key.endswith("_active"):
             pool_slug = self._key[len("fleet_pool_") : -len("_active")]
@@ -1130,7 +1814,12 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> Optional[Any]:
         """Return the state of the sensor."""
-        if self.entity_description.key in {"overheated", "vr_overheated"}:
+        if self.entity_description.key in {
+            "overheated",
+            "vr_overheated",
+            "aleo_overheated",
+            "ltc_overheated",
+        }:
             if not self.coordinator.data:
                 return 0
 
@@ -1152,12 +1841,34 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
                         ),
                     )
                 )
-            else:
+            elif self.entity_description.key == "vr_overheated":
                 temp_c = _vr_temp_c(info)
                 threshold = float(
                     runtime_entry.get(
                         CONF_VR_OVERHEAT_THRESHOLD_C,
                         threshold_default,
+                    )
+                )
+            elif self.entity_description.key == "aleo_overheated":
+                temp_c = _goldshell_parse_temp(_goldshell_get_coin_data(info, 0), 0)
+                threshold = float(
+                    runtime_entry.get(
+                        CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
+                        runtime_entry.get(
+                            CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C,
+                            threshold_default,
+                        ),
+                    )
+                )
+            else:
+                temp_c = _goldshell_parse_temp(_goldshell_get_coin_data(info, 1), 0)
+                threshold = float(
+                    runtime_entry.get(
+                        CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C,
+                        runtime_entry.get(
+                            CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C,
+                            threshold_default,
+                        ),
                     )
                 )
 

@@ -43,7 +43,7 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up button entities for Bitaxe/NerdAxe."""
+    """Set up button entities for Bitaxe/NerdAxe/Avalon."""
     coordinator: BitaxeDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id][
         "coordinator"
     ]

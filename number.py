@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -12,14 +13,32 @@ from .const import (
     CONF_ASIC_OVERHEAT_THRESHOLD_C,
     CONF_DEVICE_NAME,
     CONF_DEVICE_SLUG,
+    CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
+    CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C,
+    CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C,
+    CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C,
     CONF_HOST,
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
     CONF_VR_OVERHEAT_THRESHOLD_C,
     DOMAIN,
+    MINER_TYPE_GOLDSHELL,
     overheat_threshold_profile,
 )
 from .utils import normalize_identifier
+
+
+def _cleanup_legacy_goldshell_number_entities(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove stale Goldshell number entities using legacy Temp1/Temp2 keys."""
+    entity_registry = er.async_get(hass)
+    for registry_entry in er.async_entries_for_config_entry(entity_registry, entry_id):
+        if registry_entry.domain != "number":
+            continue
+        unique_id = registry_entry.unique_id or ""
+        if unique_id.endswith(f"_{CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C}") or unique_id.endswith(
+            f"_{CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C}"
+        ):
+            entity_registry.async_remove(registry_entry.entity_id)
 
 
 async def async_setup_entry(
@@ -36,52 +55,118 @@ async def async_setup_entry(
     device_slug = config_entry.data.get(CONF_DEVICE_SLUG, normalize_identifier(host))
 
     min_value, max_value, default_value = overheat_threshold_profile(miner_type)
-    current_asic_value = float(
-        config_entry.options.get(
-            CONF_ASIC_OVERHEAT_THRESHOLD_C,
-            config_entry.options.get(
-                CONF_OVERHEAT_THRESHOLD_C,
-                default_value,
-            ),
-        )
-    )
-    current_vr_value = float(
-        config_entry.options.get(
-            CONF_VR_OVERHEAT_THRESHOLD_C,
-            default_value,
-        )
-    )
+    entities: list[BitaxeOverheatThresholdNumber] = []
 
-    async_add_entities(
-        [
-            BitaxeOverheatThresholdNumber(
-                hass,
-                config_entry,
-                miner_type,
-                device_name,
-                device_slug,
-                CONF_ASIC_OVERHEAT_THRESHOLD_C,
-                "ASIC Overheat Alert Threshold",
-                current_asic_value,
-                min_value,
-                max_value,
-                "mdi:chip",
-            ),
-            BitaxeOverheatThresholdNumber(
-                hass,
-                config_entry,
-                miner_type,
-                device_name,
-                device_slug,
-                CONF_VR_OVERHEAT_THRESHOLD_C,
-                "VR Overheat Alert Threshold",
-                current_vr_value,
-                min_value,
-                max_value,
-                "mdi:thermometer-lines",
+    if miner_type == MINER_TYPE_GOLDSHELL:
+        _cleanup_legacy_goldshell_number_entities(hass, config_entry.entry_id)
+
+        current_temp1_value = float(
+            config_entry.options.get(
+                CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
+                config_entry.options.get(
+                    CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C,
+                    config_entry.options.get(
+                        CONF_ASIC_OVERHEAT_THRESHOLD_C,
+                        config_entry.options.get(
+                            CONF_OVERHEAT_THRESHOLD_C,
+                            default_value,
+                        ),
+                    ),
+                ),
             )
-        ]
-    )
+        )
+        current_temp2_value = float(
+            config_entry.options.get(
+                CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C,
+                config_entry.options.get(
+                    CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C,
+                    config_entry.options.get(
+                        CONF_VR_OVERHEAT_THRESHOLD_C,
+                        default_value,
+                    ),
+                ),
+            )
+        )
+
+        entities.extend(
+            [
+                BitaxeOverheatThresholdNumber(
+                    hass,
+                    config_entry,
+                    miner_type,
+                    device_name,
+                    device_slug,
+                    CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
+                    "ALEO Overheat Alert Threshold",
+                    current_temp1_value,
+                    min_value,
+                    max_value,
+                    "mdi:thermometer-high",
+                ),
+                BitaxeOverheatThresholdNumber(
+                    hass,
+                    config_entry,
+                    miner_type,
+                    device_name,
+                    device_slug,
+                    CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C,
+                    "LTC Overheat Alert Threshold",
+                    current_temp2_value,
+                    min_value,
+                    max_value,
+                    "mdi:thermometer",
+                ),
+            ]
+        )
+    else:
+        current_asic_value = float(
+            config_entry.options.get(
+                CONF_ASIC_OVERHEAT_THRESHOLD_C,
+                config_entry.options.get(
+                    CONF_OVERHEAT_THRESHOLD_C,
+                    default_value,
+                ),
+            )
+        )
+        current_vr_value = float(
+            config_entry.options.get(
+                CONF_VR_OVERHEAT_THRESHOLD_C,
+                default_value,
+            )
+        )
+
+        entities.extend(
+            [
+                BitaxeOverheatThresholdNumber(
+                    hass,
+                    config_entry,
+                    miner_type,
+                    device_name,
+                    device_slug,
+                    CONF_ASIC_OVERHEAT_THRESHOLD_C,
+                    "ASIC Overheat Alert Threshold",
+                    current_asic_value,
+                    min_value,
+                    max_value,
+                    "mdi:chip",
+                ),
+                BitaxeOverheatThresholdNumber(
+                    hass,
+                    config_entry,
+                    miner_type,
+                    device_name,
+                    device_slug,
+                    CONF_VR_OVERHEAT_THRESHOLD_C,
+                    "VR Overheat Alert Threshold",
+                    current_vr_value,
+                    min_value,
+                    max_value,
+                    "mdi:thermometer-lines",
+                ),
+            ]
+        )
+
+    async_add_entities(entities)
 
 
 class BitaxeOverheatThresholdNumber(NumberEntity):
@@ -140,6 +225,10 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
         if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
             # Keep legacy option key synchronized for backward compatibility.
             current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+        if self._threshold_key == CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C:
+            current_options[CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+        if self._threshold_key == CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C:
+            current_options[CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C] = self._attr_native_value
         self.hass.config_entries.async_update_entry(self._config_entry, options=current_options)
 
         runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
@@ -147,5 +236,9 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
             runtime_entry[self._threshold_key] = self._attr_native_value
             if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
                 runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+            if self._threshold_key == CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C:
+                runtime_entry[CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+            if self._threshold_key == CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C:
+                runtime_entry[CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C] = self._attr_native_value
 
         self.async_write_ha_state()

@@ -1,4 +1,4 @@
-"""API client for Bitaxe/NerdAxe/Avalon miners."""
+"""API client for Bitaxe/NerdAxe/Avalon/Goldshell miners."""
 
 import asyncio
 import logging
@@ -9,6 +9,9 @@ from urllib.parse import urlparse
 import aiohttp
 
 from .const import (
+    API_GOLDSHELL_DEVS,
+    API_GOLDSHELL_POOLS,
+    API_GOLDSHELL_RESTART,
     API_SYSTEM,
     API_SYSTEM_ASIC,
     API_SYSTEM_INFO,
@@ -16,6 +19,7 @@ from .const import (
     DEFAULT_TIMEOUT,
     MINER_TYPE_AVALON,
     MINER_TYPE_BITAXE,
+    MINER_TYPE_GOLDSHELL,
     MINER_TYPE_NERDAXE,
 )
 
@@ -53,6 +57,19 @@ class BitaxeAPIClient:
         self._avalon_port = avalon_port
         self._avalon_web_user = avalon_web_user
         self._avalon_web_password = avalon_web_password
+        self._goldshell_mac_address = ""
+
+    @staticmethod
+    def _normalize_mac_address(value: Any) -> str:
+        """Return normalized MAC address (uppercase XX:XX:XX:XX:XX:XX) or empty string."""
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+
+        match = re.search(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", raw)
+        if not match:
+            return ""
+        return match.group(0).upper()
 
     async def get_system_info(self, timeout: Optional[float] = None) -> Dict[str, Any]:
         """Fetch system information from /api/system/info.
@@ -72,6 +89,9 @@ class BitaxeAPIClient:
 
         if self.miner_type == MINER_TYPE_AVALON:
             return await self._avalon_system_info(timeout=timeout or DEFAULT_TIMEOUT)
+
+        if self.miner_type == MINER_TYPE_GOLDSHELL:
+            return await self._goldshell_system_info(timeout=timeout or DEFAULT_TIMEOUT)
 
         raise ValueError(f"Unsupported miner type: {self.miner_type}")
 
@@ -93,6 +113,9 @@ class BitaxeAPIClient:
 
         if self.miner_type == MINER_TYPE_AVALON:
             return await self._avalon_asic_info(timeout=timeout or DEFAULT_TIMEOUT)
+
+        if self.miner_type == MINER_TYPE_GOLDSHELL:
+            return {}
 
         raise ValueError(f"Unsupported miner type: {self.miner_type}")
 
@@ -116,6 +139,15 @@ class BitaxeAPIClient:
             if self.miner_type == MINER_TYPE_AVALON:
                 result = await self._avalon_command("ascset", "0,reboot,0", timeout=timeout)
                 return bool(result.get("success"))
+
+            if self.miner_type == MINER_TYPE_GOLDSHELL:
+                await self._async_request(
+                    "PUT",
+                    API_GOLDSHELL_RESTART,
+                    json_payload={},
+                    timeout=timeout or DEFAULT_TIMEOUT,
+                )
+                return True
 
             raise ValueError(f"Unsupported miner type: {self.miner_type}")
         except Exception as e:
@@ -372,6 +404,13 @@ class BitaxeAPIClient:
             "uptimeSeconds": summary.get("Elapsed") or 0,
             "stratum": {"pools": pools},
         }
+        # Fetch and merge device info (firmware, MAC, hardware)
+        try:
+            device_info = await self._goldshell_get_device_info(timeout=timeout)
+            info.update(device_info)
+        except Exception as e:
+            _LOGGER.debug(f"Failed to fetch Goldshell device info: {e}")
+
         return info
 
     def _avalon_find_chip_type(self, *payloads: Any) -> str:
@@ -776,6 +815,226 @@ class BitaxeAPIClient:
             "raw": raw,
             "sections": sections,
         }
+
+    async def _goldshell_system_info(self, timeout: float) -> Dict[str, Any]:
+        """Fetch and normalize Goldshell Byte device data from /mcb/cgminer?cgminercmd=devs."""
+        devs_data = await self._async_request("GET", API_GOLDSHELL_DEVS, timeout=timeout)
+
+        # Start with base payload so device metadata can still be merged while idle.
+        info: Dict[str, Any] = {
+            "minfos": [],
+            "hostname": self.host,
+            "ASICModel": "Goldshell Byte",
+        }
+
+        # Extract minfos array (contains dual-coin data)
+        minfos = devs_data.get("minfos", [])
+        if isinstance(minfos, list):
+            info["minfos"] = minfos
+        else:
+            minfos = []
+
+        # Extract first coin (ALEO - index 0) data if available
+        if len(minfos) > 0 and isinstance(minfos[0], dict):
+            aleo_device = minfos[0]
+            aleo_infos = aleo_device.get("infos", [])
+            if isinstance(aleo_infos, list) and len(aleo_infos) > 0:
+                aleo_info = aleo_infos[0]
+                if isinstance(aleo_info, dict):
+                    try:
+                        # Parse hashrate
+                        aleo_hashrate = float(aleo_info.get("hashrate", 0))
+                        info["hashRate"] = round(aleo_hashrate, 3)
+                    except (TypeError, ValueError):
+                        info["hashRate"] = 0
+
+                    try:
+                        # Parse power
+                        aleo_power = float(aleo_info.get("power", 0))
+                        info["power"] = round(aleo_power, 2)
+                    except (TypeError, ValueError):
+                        info["power"] = 0
+
+                    try:
+                        # Parse temperature (format: "XX°C/YY°C")
+                        temp_str = str(aleo_info.get("temp", ""))
+                        if "/" in temp_str:
+                            temp1_str = temp_str.split("/")[0].replace("°C", "").strip()
+                            temp1 = float(temp1_str)
+                            info["temp"] = round(temp1, 2)
+                    except (TypeError, ValueError):
+                        info["temp"] = 0
+
+                    try:
+                        # Parse fan speed
+                        fan_str = str(aleo_info.get("fanspeed", "0")).replace("rpm", "").strip()
+                        info["fanrpm"] = int(fan_str)
+                    except (TypeError, ValueError):
+                        info["fanrpm"] = 0
+
+                    # Shares and errors
+                    try:
+                        info["sharesAccepted"] = int(aleo_info.get("accepted", 0))
+                    except (TypeError, ValueError):
+                        info["sharesAccepted"] = 0
+
+                    try:
+                        info["sharesRejected"] = int(aleo_info.get("hwerrors", 0))
+                    except (TypeError, ValueError):
+                        info["sharesRejected"] = 0
+
+                    # Uptime
+                    try:
+                        info["uptimeSeconds"] = int(aleo_info.get("time", 0))
+                    except (TypeError, ValueError):
+                        info["uptimeSeconds"] = 0
+
+        # Merge device metadata and control-state fields from status/setting endpoints.
+        try:
+            device_info = await self._goldshell_get_device_info(timeout=timeout)
+            info.update(device_info)
+        except Exception as e:
+            _LOGGER.debug("Failed to fetch Goldshell device info: %s", e)
+
+        # Merge read-only pool monitoring data from /mcb/pools.
+        try:
+            pools_data = await self._async_request("GET", API_GOLDSHELL_POOLS, timeout=timeout)
+            if isinstance(pools_data, list):
+                info["goldshell_pools"] = pools_data
+            else:
+                info["goldshell_pools"] = []
+        except Exception as e:
+            _LOGGER.debug("Failed to fetch Goldshell pools info: %s", e)
+            info.setdefault("goldshell_pools", [])
+
+        return info
+
+    async def _goldshell_get_device_info(self, timeout: float) -> Dict[str, Any]:
+        """Fetch Goldshell device info from /mcb/status and /mcb/setting.
+        
+        Returns:
+            Dictionary with firmware_version, hardware_version, device_model, mac_address
+        """
+        device_info: Dict[str, Any] = {}
+        
+        try:
+            status = await self._async_request("GET", "/mcb/status", timeout=timeout)
+            device_info["firmware_version"] = status.get("firmware", "")
+            device_info["hardware_version"] = status.get("hardware", "")
+            device_info["device_model"] = status.get("model", "")
+        except Exception as e:
+            _LOGGER.debug(f"Failed to fetch /mcb/status: {e}")
+
+        try:
+            setting = await self._async_request("GET", "/mcb/setting", timeout=timeout)
+            current_mac = self._normalize_mac_address(setting.get("name", ""))
+            if current_mac:
+                self._goldshell_mac_address = current_mac
+            if self._goldshell_mac_address:
+                device_info["mac_address"] = self._goldshell_mac_address
+            device_info["idle_mode"] = bool(setting.get("idlemode", False))
+        except Exception as e:
+            _LOGGER.debug(f"Failed to fetch /mcb/setting: {e}")
+            if self._goldshell_mac_address:
+                device_info["mac_address"] = self._goldshell_mac_address
+        
+        return device_info
+
+    async def get_goldshell_setting(self, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Fetch Goldshell /mcb/setting payload."""
+        if self.miner_type != MINER_TYPE_GOLDSHELL:
+            raise ValueError(f"Unsupported miner type for setting read: {self.miner_type}")
+
+        return await self._async_request(
+            "GET",
+            "/mcb/setting",
+            timeout=timeout or DEFAULT_TIMEOUT,
+        )
+
+    async def set_goldshell_idle_mode(
+        self,
+        enabled: bool,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Set Goldshell idle mode via PUT /mcb/setting."""
+        if self.miner_type != MINER_TYPE_GOLDSHELL:
+            raise ValueError(f"Unsupported miner type for idle mode: {self.miner_type}")
+
+        setting = await self.get_goldshell_setting(timeout=timeout)
+        current_mac = self._normalize_mac_address(setting.get("name", ""))
+        if current_mac:
+            self._goldshell_mac_address = current_mac
+        setting["idlemode"] = bool(enabled)
+        await self._async_request(
+            "PUT",
+            "/mcb/setting",
+            json_payload=setting,
+            timeout=timeout or DEFAULT_TIMEOUT,
+        )
+        return setting
+
+    async def set_goldshell_power_mode(
+        self,
+        level: int,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Set Goldshell shared power mode level across all cards via PUT /mcb/setting."""
+        if self.miner_type != MINER_TYPE_GOLDSHELL:
+            raise ValueError(f"Unsupported miner type for power mode: {self.miner_type}")
+
+        setting = await self.get_goldshell_setting(timeout=timeout)
+        current_mac = self._normalize_mac_address(setting.get("name", ""))
+        if current_mac:
+            self._goldshell_mac_address = current_mac
+        cpbs = setting.get("cpbs")
+        if not isinstance(cpbs, list):
+            raise ValueError("Invalid Goldshell setting payload: missing cpbs")
+
+        updated_boards = 0
+        for board in cpbs:
+            if not isinstance(board, dict):
+                continue
+
+            modes = board.get("mode")
+            if not isinstance(modes, list) or not modes:
+                continue
+
+            mode_index = int(board.get("algo_select", 0) or 0)
+            if mode_index < 0 or mode_index >= len(modes):
+                mode_index = 0
+
+            mode_data = modes[mode_index]
+            if not isinstance(mode_data, dict):
+                continue
+
+            plans = mode_data.get("powerplans")
+            if not isinstance(plans, list) or not plans:
+                continue
+
+            level_exists = False
+            for plan in plans:
+                if isinstance(plan, dict) and int(plan.get("level", -1)) == int(level):
+                    level_exists = True
+                    break
+            if not level_exists:
+                board_id = int(board.get("id", -1))
+                raise ValueError(f"Power level {level} not available for card {board_id}")
+
+            # Goldshell Byte expects mode.select to be the selected level value (e.g. 0 or 2),
+            # not the index in powerplans.
+            mode_data["select"] = int(level)
+            updated_boards += 1
+
+        if updated_boards == 0:
+            raise ValueError("No Goldshell boards available for power mode update")
+
+        await self._async_request(
+            "PUT",
+            "/mcb/setting",
+            json_payload=setting,
+            timeout=timeout or DEFAULT_TIMEOUT,
+        )
+        return setting
 
     async def _async_request(
         self,

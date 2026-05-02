@@ -13,6 +13,10 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_SLUG,
     CONF_ENTRY_TYPE,
+    CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
+    CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C,
+    CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C,
+    CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C,
     CONF_HOST,
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
@@ -160,6 +164,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             threshold_default,
         )
     )
+    goldshell_temp1_threshold = float(
+        entry.options.get(
+            CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
+            entry.options.get(
+                CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C,
+                asic_threshold,
+            ),
+        )
+    )
+    goldshell_temp2_threshold = float(
+        entry.options.get(
+            CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C,
+            entry.options.get(
+                CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C,
+                vr_threshold,
+            ),
+        )
+    )
     hass.data[DOMAIN][entry.entry_id] = {
         "entry_type": ENTRY_TYPE_MINER,
         "miner_type": miner_type,
@@ -172,6 +194,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_OVERHEAT_THRESHOLD_C: asic_threshold,
         CONF_ASIC_OVERHEAT_THRESHOLD_C: asic_threshold,
         CONF_VR_OVERHEAT_THRESHOLD_C: vr_threshold,
+        CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C: goldshell_temp1_threshold,
+        CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C: goldshell_temp2_threshold,
+        CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C: goldshell_temp1_threshold,
+        CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C: goldshell_temp2_threshold,
     }
 
     # Register services (only once per domain)

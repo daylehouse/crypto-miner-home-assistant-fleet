@@ -1,7 +1,7 @@
-"""Constants for the Bitaxe/NerdAxe integration."""
+"""Constants for the Bitaxe/NerdAxe/Avalon/Goldshell integration."""
 
 DOMAIN = "axeos"
-NAME = "Bitaxe/NerdAxe/Avalon Miner"
+NAME = "Bitaxe/NerdAxe/Avalon/Goldshell Miner"
 PLATFORMS_MINER = ["sensor", "button", "switch", "select", "number"]
 PLATFORMS_FLEET = ["sensor"]
 PLATFORMS = PLATFORMS_MINER
@@ -10,7 +10,8 @@ PLATFORMS = PLATFORMS_MINER
 MINER_TYPE_BITAXE = "bitaxe"
 MINER_TYPE_NERDAXE = "nerdaxe"
 MINER_TYPE_AVALON = "avalon"
-MINER_TYPES = [MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE, MINER_TYPE_AVALON]
+MINER_TYPE_GOLDSHELL = "goldshell"
+MINER_TYPES = [MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE, MINER_TYPE_AVALON, MINER_TYPE_GOLDSHELL]
 
 # Config entry keys
 CONF_HOST = "host"
@@ -23,8 +24,16 @@ CONF_ENTRY_TYPE = "entry_type"
 CONF_OVERHEAT_THRESHOLD_C = "overheat_threshold_c"
 CONF_ASIC_OVERHEAT_THRESHOLD_C = "asic_overheat_threshold_c"
 CONF_VR_OVERHEAT_THRESHOLD_C = "vr_overheat_threshold_c"
+# Preferred Goldshell per-card threshold keys
+CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C = "goldshell_aleo_overheat_threshold_c"
+CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C = "goldshell_ltc_overheat_threshold_c"
+# Legacy Goldshell threshold keys (kept for backward compatibility)
+CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C = "goldshell_temp1_overheat_threshold_c"
+CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C = "goldshell_temp2_overheat_threshold_c"
 CONF_AVALON_USERNAME = "avalon_username"
 CONF_AVALON_PASSWORD = "avalon_password"
+CONF_GOLDSHELL_USERNAME = "goldshell_username"
+CONF_GOLDSHELL_PASSWORD = "goldshell_password"
 
 # Config entry types
 ENTRY_TYPE_MINER = "miner"
@@ -35,6 +44,10 @@ API_SYSTEM_INFO = "/api/system/info"
 API_SYSTEM_ASIC = "/api/system/asic"
 API_SYSTEM_RESTART = "/api/system/restart"
 API_SYSTEM = "/api/system"
+# Goldshell endpoints
+API_GOLDSHELL_DEVS = "/mcb/cgminer?cgminercmd=devs"
+API_GOLDSHELL_POOLS = "/mcb/pools"
+API_GOLDSHELL_RESTART = "/mcb/restart"
 
 # Update intervals (seconds)
 SCAN_INTERVAL = 30

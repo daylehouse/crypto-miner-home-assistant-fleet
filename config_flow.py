@@ -1,4 +1,4 @@
-"""Config flow for Bitaxe/NerdAxe integration."""
+"""Config flow for Bitaxe/NerdAxe/Avalon/Goldshell integration."""
 
 import logging
 from typing import Any, Optional
@@ -20,6 +20,8 @@ from .const import (
     CONF_POOLS,
     CONF_AVALON_USERNAME,
     CONF_AVALON_PASSWORD,
+    CONF_GOLDSHELL_USERNAME,
+    CONF_GOLDSHELL_PASSWORD,
     CONNECTION_TIMEOUT,
     DOMAIN,
     ENTRY_TYPE_FLEET,
@@ -31,6 +33,7 @@ from .const import (
     MINER_TYPE_BITAXE,
     MINER_TYPE_AVALON,
     MINER_TYPE_NERDAXE,
+    MINER_TYPE_GOLDSHELL,
 )
 from .utils import normalize_identifier
 
@@ -360,6 +363,9 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_DEVICE_NAME: device_name,
                     CONF_DEVICE_SLUG: device_slug,
                 }
+                # Goldshell skips pool configuration and goes directly to credentials
+                if self.miner_type == MINER_TYPE_GOLDSHELL:
+                    return await self.async_step_goldshell_credentials()
                 return await self.async_step_pools()
 
         return self.async_show_form(
@@ -371,6 +377,7 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             MINER_TYPE_BITAXE: "Bitaxe",
                             MINER_TYPE_NERDAXE: "NerdAxe",
                             MINER_TYPE_AVALON: "Avalon",
+                            MINER_TYPE_GOLDSHELL: "Goldshell Byte",
                         }
                     ),
                     vol.Required(CONF_HOST): str,
@@ -413,11 +420,15 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 self._pending_info = info
                 self._pending_data = {
+                    CONF_ENTRY_TYPE: ENTRY_TYPE_MINER,
                     CONF_HOST: host,
                     CONF_MINER_TYPE: self.miner_type,
                     CONF_DEVICE_NAME: device_name,
                     CONF_DEVICE_SLUG: device_slug,
                 }
+                # Goldshell skips pool configuration and goes directly to credentials
+                if self.miner_type == MINER_TYPE_GOLDSHELL:
+                    return await self.async_step_goldshell_credentials()
                 return await self.async_step_pools()
 
         return self.async_show_form(
@@ -497,6 +508,37 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={
                 "device_name": self._pending_data.get(CONF_DEVICE_NAME, "Avalon Miner"),
+            },
+        )
+
+    async def async_step_goldshell_credentials(
+        self, user_input: Optional[dict[str, Any]] = None
+    ) -> FlowResult:
+        """Ask for Goldshell miner credentials (placeholder username/password)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            username = str(user_input.get(CONF_GOLDSHELL_USERNAME, "")).strip()
+            password = str(user_input.get(CONF_GOLDSHELL_PASSWORD, "")).strip()
+
+            # Store credentials in pending data and create entry
+            self._pending_data[CONF_GOLDSHELL_USERNAME] = username
+            self._pending_data[CONF_GOLDSHELL_PASSWORD] = password
+
+            return self.async_create_entry(
+                title=self._pending_data[CONF_DEVICE_NAME],
+                data=self._pending_data,
+            )
+
+        return self.async_show_form(
+            step_id="goldshell_credentials",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_GOLDSHELL_USERNAME, default=""): str,
+                vol.Optional(CONF_GOLDSHELL_PASSWORD, default=""): str,
+            }),
+            errors=errors,
+            description_placeholders={
+                "device_name": self._pending_data.get(CONF_DEVICE_NAME, "Goldshell Byte"),
             },
         )
 
