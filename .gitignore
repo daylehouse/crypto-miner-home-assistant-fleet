@@ -3,3 +3,4 @@ __pycache__/
 .DS_Store
 *.log
 *.code-workspace
+TESTING.md
