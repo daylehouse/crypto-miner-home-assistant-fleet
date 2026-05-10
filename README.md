@@ -20,7 +20,7 @@
 
 > **PLAYER ONE — YOUR MINERS ARE NOW IN HOME ASSISTANT.**
 
-An arcade-themed Home Assistant integration for monitoring and managing Bitaxe, NerdAxe, Avalon, and Goldshell ASIC miners. Crypto Miner Fleet Monitor is the telemetry backend for the companion [Bitcoin Miner Card](https://github.com/daylehouse/bitcoin-miner-card), exposing the live stats, thermal data, fan speed, pool details, thresholds, and fleet rollups the card expects.
+Home Assistant integration for monitoring and managing Bitaxe, NerdAxe, Avalon, and Goldshell ASIC miners. Crypto Miner Fleet Monitor is the telemetry backend for the companion [Bitcoin Miner Card](https://github.com/daylehouse/bitcoin-miner-card), exposing the live stats, thermal data, fan speed, pool details, thresholds, and fleet rollups the card expects. Or just use the sensors in your own dashboards!
 
 Version 1.2.0 adds Goldshell Byte support with dual-algorithm ALEO and LTC monitoring, controls, and fleet aggregation alongside the existing Bitaxe, NerdAxe, and Avalon support.
 
