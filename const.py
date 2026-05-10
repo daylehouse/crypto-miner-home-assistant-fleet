@@ -1,7 +1,7 @@
 """Constants for the Bitaxe/NerdAxe/Avalon/Goldshell integration."""
 
 DOMAIN = "axeos"
-NAME = "Bitaxe/NerdAxe/Avalon/Goldshell Miner"
+NAME = "Crypto Miner Fleet Monitor"
 PLATFORMS_MINER = ["sensor", "button", "switch", "select", "number"]
 PLATFORMS_FLEET = ["sensor"]
 PLATFORMS = PLATFORMS_MINER

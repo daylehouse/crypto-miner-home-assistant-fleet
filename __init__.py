@@ -71,7 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry_type == ENTRY_TYPE_FLEET:
         hass.data[DOMAIN][entry.entry_id] = {
             "entry_type": ENTRY_TYPE_FLEET,
-            "device_name": entry.data.get(CONF_DEVICE_NAME, "AxeOS Fleet"),
+            "device_name": entry.data.get(CONF_DEVICE_NAME, "Crypto Miner Fleet Monitor"),
             "device_slug": entry.data.get(CONF_DEVICE_SLUG, "fleet"),
         }
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_FLEET)

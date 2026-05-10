@@ -1,6 +1,6 @@
 {
   "domain": "axeos",
-  "name": "Bitaxe/NerdAxe/Avalon/Goldshell Miner",
+  "name": "Crypto Miner Fleet Monitor",
   "codeowners": ["@daylehouse"],
   "config_flow": true,
   "documentation": "https://github.com/daylehouse/crypto-miner-home-assistant-fleet",

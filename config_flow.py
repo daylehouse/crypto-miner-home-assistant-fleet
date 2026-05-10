@@ -314,10 +314,10 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         return self.async_create_entry(
-            title="AxeOS Fleet",
+            title="Crypto Miner Fleet Monitor",
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_FLEET,
-                CONF_DEVICE_NAME: "AxeOS Fleet",
+                CONF_DEVICE_NAME: "Crypto Miner Fleet Monitor",
                 CONF_DEVICE_SLUG: "fleet",
             },
         )

@@ -1430,7 +1430,7 @@ class BitaxeFleetSensorEntity(SensorEntity):
             self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_device_info = {
             "identifiers": {(DOMAIN, "fleet")},
-            "name": "AxeOS Fleet",
+            "name": "Crypto Miner Fleet Monitor",
             "manufacturer": "Bitaxe Project",
             "model": "Fleet",
         }

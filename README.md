@@ -1,95 +1,146 @@
-# Bitaxe/NerdAxe/Avalon/Goldshell Miner Home Assistant Integration
+# ₿ CRYPTO MINER FLEET MONITOR
 
-Home Assistant integration for monitoring and managing Bitaxe, NerdAxe, Avalon, and Goldshell ASIC miners.
+```text
+  ██████╗██████╗ ██╗   ██╗██████╗ ████████╗ ██████╗
+ ██╔════╝██╔══██╗╚██╗ ██╔╝██╔══██╗╚══██╔══╝██╔═══██╗
+ ██║     ██████╔╝ ╚████╔╝ ██████╔╝   ██║   ██║   ██║
+ ██║     ██╔══██╗  ╚██╔╝  ██╔═══╝    ██║   ██║   ██║
+ ╚██████╗██║  ██║   ██║   ██║        ██║   ╚██████╔╝
+  ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚═╝        ╚═╝    ╚═════╝
 
-Version 1.2.0 adds Goldshell Byte support, including dual-algorithm ALEO/LTC monitoring, device controls, and fleet rollups alongside the existing Bitaxe, NerdAxe, and Avalon support.
+ ███╗   ███╗ ██████╗ ███╗   ██╗██╗████████╗ ██████╗ ██████╗
+ ████╗ ████║██╔═══██╗████╗  ██║██║╚══██╔══╝██╔═══██╗██╔══██╗
+ ██╔████╔██║██║   ██║██╔██╗ ██║██║   ██║   ██║   ██║██████╔╝
+ ██║╚██╔╝██║██║   ██║██║╚██╗██║██║   ██║   ██║   ██║██╔══██╗
+ ██║ ╚═╝ ██║╚██████╔╝██║ ╚████║██║   ██║   ╚██████╔╝██║  ██║
+ ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝
 
-## Features
+      TRACK YOUR MINERS  >>>  ₿₿₿
+```
 
-- Config flow setup for miner entries and a standalone fleet entry
-- Support for Bitaxe, NerdAxe, Avalon, and Goldshell devices
-- Per-miner monitoring for hashrate, power, temperatures, uptime, shares, pool details, firmware, and more
-- Restart button and pool configuration service where supported
-- Fleet-wide sensors for hashrate, power, efficiency, online/offline counts, and pool activity
-- Per-miner overheat threshold sliders from 55°C to 75°C
-- Per-miner `Overheated` output sensors
-- Fleet overheated miner count plus hostname list attribute for automations
-- Local brand assets for Home Assistant config flow and integrations UI
-- Goldshell-specific idle mode switch and shared power mode select
-- Goldshell read-only pool monitoring for both ALEO and LTC boards
+> **PLAYER ONE — YOUR MINERS ARE NOW IN HOME ASSISTANT.**
 
-## Installation
+An arcade-themed Home Assistant integration for monitoring and managing Bitaxe, NerdAxe, Avalon, and Goldshell ASIC miners. Crypto Miner Fleet Monitor is the telemetry backend for the companion [Bitcoin Miner Card](https://github.com/daylehouse/bitcoin-miner-card), exposing the live stats, thermal data, fan speed, pool details, thresholds, and fleet rollups the card expects.
 
-### HACS
+Version 1.2.0 adds Goldshell Byte support with dual-algorithm ALEO and LTC monitoring, controls, and fleet aggregation alongside the existing Bitaxe, NerdAxe, and Avalon support.
+
+<img src="https://raw.githubusercontent.com/daylehouse/bitcoin-miner-card/refs/heads/GA-Branch/concept.png" alt="Bitcoin Miner Card concept preview" width="560">
+
+---
+
+## 🕹️ FEATURES — POWER-UPS ONLINE
+
+| Feature | Status |
+|---|---|
+| Config flow setup for miners plus one shared fleet entry | ✅ ACTIVE |
+| Bitaxe, NerdAxe, Avalon, and Goldshell support | ✅ ACTIVE |
+| Per-miner sensors for hashrate, power, temperature, uptime, shares, pool data, firmware, and diagnostics | ✅ ACTIVE |
+| Restart button and supported control entities | ✅ ACTIVE |
+| Fleet rollups for hashrate, power, efficiency, online state, pool activity, and overheating | ✅ ACTIVE |
+| Overheat threshold sliders per miner or per Goldshell board | ✅ ACTIVE |
+| Overheated status outputs for miner-level automation | ✅ ACTIVE |
+| Goldshell Byte ALEO and LTC board separation | ✅ ACTIVE |
+| Goldshell idle mode switch and power mode select | ✅ ACTIVE |
+| Companion-ready entity model for Bitcoin Miner Card dashboards | ✅ ACTIVE |
+| Local brand assets for Home Assistant UI polish | ✅ ACTIVE |
+
+---
+
+## 🚀 INSTALLATION — INSERT COIN
+
+### HACS *(recommended — fastest route to the control room)*
 
 1. Open HACS in Home Assistant.
 2. Add this repository as a custom integration repository.
-3. Install `Bitaxe/NerdAxe/Avalon/Goldshell Miner`.
+3. Install **Crypto Miner Fleet Monitor**.
 4. Restart Home Assistant.
 
-### Manual
+### Manual *(old-school mode)*
 
 1. Copy this integration to `/config/custom_components/axeos/`.
 2. Restart Home Assistant.
-3. Go to Settings > Devices & Services > Add Integration.
-4. Search for `Bitaxe/NerdAxe/Avalon/Goldshell Miner`.
+3. Open **Settings** → **Devices & Services** → **Add Integration**.
+4. Search for **Crypto Miner Fleet Monitor**.
 
-## Configuration
+The folder name remains `axeos` for compatibility with existing installs and entity IDs.
 
-The config flow supports two entry types:
+---
 
-- Miner: Adds a single Bitaxe, NerdAxe, Avalon, or Goldshell device
-- Fleet: Adds an aggregate fleet device with cross-miner sensors
+## ⚙️ CONFIGURATION — CHOOSE YOUR FIGHTER
 
-Each miner should be added as its own config entry. After miner entries are configured, add one fleet entry to expose the fleet sensors.
+This integration supports two config entry types:
 
-## Entities
+| Entry Type | Description |
+|---|---|
+| `Miner` | Adds one Bitaxe, NerdAxe, Avalon, or Goldshell device |
+| `Fleet` | Adds a shared aggregate device with cross-miner sensors |
+
+Add each miner as its own config entry. Once your miners are online, add one fleet entry for the aggregate sensors.
+
+### Supported miner types
+
+| Miner | Notes |
+|---|---|
+| Bitaxe | Uses the AxeOS API |
+| NerdAxe | Uses the same API structure as Bitaxe |
+| Avalon | Uses CGMiner-compatible API on port `4028` |
+| Goldshell Byte | Uses current firmware `/mcb` endpoints |
+
+---
+
+## 📡 ENTITIES — LIVE TELEMETRY FEED
 
 ### Per-miner entities
 
-- Sensors for hashrate, power, ASIC/board temperature, fan metrics, shares, pool details, firmware, hostname, MAC, uptime, IPv4 address, and diagnostics
-- `Mining Active` read-only output sensor
-- `Overheated` read-only output sensor
-- `Overheat Alert Threshold` slider (`number`) with range 55-75°C
-- Restart button
-- Pool/profile selects where supported
+| Entity Group | What you get |
+|---|---|
+| Core metrics | Hashrate, power, uptime, model, firmware, hostname, IPv4, MAC |
+| Thermal metrics | ASIC, VR, exhaust, board temperatures, overheat outputs, threshold sliders |
+| Cooling metrics | Fan speed and fan RPM where exposed |
+| Pool metrics | URL, port, user, active state, difficulty, accepted/rejected shares |
+| Controls | Restart button, pool/profile selects where supported |
+| Diagnostics | Status and firmware-dependent health metrics |
 
-Goldshell notes:
+### Goldshell Byte notes
 
-- Goldshell Byte exposes separate ALEO and LTC sensors, including hashrate, power, temperatures, shares, reject rate, hardware error rate, and pool monitoring
-- Goldshell does not use the preset pool selection flow used by Bitaxe and similar miners
-- Goldshell includes an idle mode switch and a shared power mode select with `Paused`, `High Power`, and `Standard Power`
-- Goldshell overheat thresholds are configured separately for ALEO and LTC boards
+| Goldshell feature | Details |
+|---|---|
+| Dual board telemetry | Separate ALEO and LTC sensors |
+| Thermal thresholds | Separate ALEO and LTC overheat sliders |
+| Fan telemetry | Separate fan RPM and percentage-based fan speed sensors |
+| Pool handling | Monitoring only, no writable pool service |
+| Device controls | Idle mode switch and shared power mode select |
 
 ### Fleet entities
 
-- Fleet Hashrate
-- Fleet ALEO Hashrate
-- Fleet LTC Hashrate
-- Fleet Power
-- Fleet Energy Efficiency
-- Fleet Hashrate per Watt
-- Fleet Miners Configured
-- Fleet Miners Online
-- Fleet Miners Offline
-- Fleet Miners Online Percentage
-- Fleet Miners Unknown Pool
-- Fleet Miners Overheated
-- Per-pool active miner count sensors for configured pools
+| Fleet sensor | Description |
+|---|---|
+| Fleet Hashrate | Total fleet hashrate |
+| Fleet ALEO Hashrate | Total ALEO hashrate across Goldshell devices |
+| Fleet LTC Hashrate | Total LTC hashrate across Goldshell devices |
+| Fleet Power | Total fleet power draw |
+| Fleet Energy Efficiency | Aggregate efficiency metric |
+| Fleet Hashrate per Watt | Fleet performance ratio |
+| Fleet Miners Configured | Number of miners added |
+| Fleet Miners Online | Online miner count |
+| Fleet Miners Offline | Offline miner count |
+| Fleet Miners Online Percentage | Online rate |
+| Fleet Miners Unknown Pool | Miner count with unmatched pool data |
+| Fleet Miners Overheated | Count of miners above configured thresholds |
 
-The fleet overheated sensor also exposes an attribute:
+The fleet overheated sensor also exposes the `overheated_miner_hostnames` attribute so automations can target exactly which devices are too hot.
 
-- `overheated_miner_hostnames`: list of hostnames currently above each miner's configured threshold
+---
 
-## Services
+## 🎛️ SERVICES — CONTROL PANEL
 
 ### `axeos.set_pool`
 
-Update the active pool settings on a miner.
+Updates the active pool settings on a miner.
 
-This service is intended for miner types that support writable pool configuration. Goldshell pool entities are monitoring-only and are not controlled through this service.
+This service is intended for miner types that support writable pool configuration. Goldshell pool entities are read-only and are not controlled through this service.
 
-Example:
+The service name remains `axeos.set_pool` for backward compatibility.
 
 ```yaml
 service: axeos.set_pool
@@ -101,9 +152,11 @@ data:
   stratum_password: "x"
 ```
 
-## Automation Example
+---
 
-You can use the fleet overheat sensor attribute in automations:
+## 🧠 AUTOMATIONS — IF HEAT, THEN REACT
+
+Use the fleet overheat attribute in templates and automations:
 
 ```yaml
 {{ state_attr('sensor.axeos_fleet_fleet_miners_overheated', 'overheated_miner_hostnames') }}
@@ -111,26 +164,65 @@ You can use the fleet overheat sensor attribute in automations:
 
 This returns a list of miner hostnames currently above their configured overheat threshold.
 
-## Supported Miners
+The entity namespace remains `axeos` to avoid breaking existing dashboards and automations.
 
-- Bitaxe models supported by the AxeOS API
-- NerdAxe models using the same API structure
-- Avalon models exposing CGMiner-compatible API on port 4028 (for example Nano series)
-- Goldshell Byte models exposing the `/mcb` API used by current firmware
+---
 
-## Notes
+## 🖥️ COMPANION CARD — PERFECT COMBO MOVE
 
-- Poll interval is 30 seconds
-- Communication is local HTTP on your network
-- The integration tolerates transient timeouts during miner restarts/reboots
-- Goldshell authentication fields are available in config flow for firmware that requires them, but current Byte firmware may allow local read access to status endpoints without login
+This integration is designed to pair with the [Bitcoin Miner Card](https://github.com/daylehouse/bitcoin-miner-card).
 
-## Repository
+For standard miners like Bitaxe, NerdAxe, and Avalon, the card-ready entity suffixes are:
 
-- Documentation: https://github.com/daylehouse/crypto-miner-home-assistant-fleet
-- Issues: https://github.com/daylehouse/crypto-miner-home-assistant-fleet/issues
+| Card input | Entity suffix |
+|---|---|
+| Title / miner label | `hostname` or device name |
+| Miner link target | `ipv4_address` |
+| Hashrate | `hashrate` |
+| Temperature | `temp_asic` |
+| Overheat state | `overheated` |
+| Fan speed | `fan_speed` |
+| Pool URL | `pool_url` |
+| Pool port | `pool_port` |
+| Accepted shares | `shares_accepted` |
+| Rejected shares | `shares_rejected` |
+| Power | `power` |
+| Model | `asic_model` or `device_model` |
 
-## Reference
+For Goldshell Byte, use the algorithm-specific sensors instead:
 
-- Bitaxe API: https://osmu.wiki/bitaxe/api/
-- Goldshell support in this integration is based on the local `/mcb` HTTP endpoints exposed by Goldshell Byte firmware
+| Goldshell card input | Entity suffix |
+|---|---|
+| ALEO hashrate | `aleo_hashrate` |
+| LTC hashrate | `ltc_hashrate` |
+| ALEO temperature | `aleo_temp_1` |
+| LTC temperature | `ltc_temp_1` |
+| ALEO fan speed | `aleo_fan_speed` |
+| LTC fan speed | `ltc_fan_speed` |
+
+If you want the card and integration to feel like one system, this is the backend piece that makes that work.
+
+---
+
+## 🛠️ NOTES — KNOW BEFORE YOU DEPLOY
+
+| Note | Value |
+|---|---|
+| Poll interval | `30` seconds |
+| Network mode | Local HTTP on your LAN |
+| Restart handling | Tolerates transient timeouts during reboots |
+| Goldshell auth | Supported in config flow when firmware requires it |
+| Goldshell read access | Current Byte firmware may expose status locally without login |
+
+---
+
+## 🔗 LINKS — WARP GATE
+
+- [Code](https://github.com/daylehouse/crypto-miner-home-assistant-fleet)
+- [Issues](https://github.com/daylehouse/crypto-miner-home-assistant-fleet/issues)
+- [Bitcoin Miner Card](https://github.com/daylehouse/bitcoin-miner-card)
+- [Bitaxe API Reference](https://osmu.wiki/bitaxe/api/)
+
+---
+
+*GAME OVER? Not here. The fleet stays online.*
