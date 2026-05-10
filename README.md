@@ -42,7 +42,7 @@ Version 1.2.0 adds Goldshell Byte support with dual-algorithm ALEO and LTC monit
 | Goldshell Byte ALEO and LTC board separation | ✅ ACTIVE |
 | Goldshell idle mode switch and power mode select | ✅ ACTIVE |
 | Companion-ready entity model for Bitcoin Miner Card dashboards | ✅ ACTIVE |
-| Local brand assets for Home Assistant UI polish | ✅ ACTIVE |
+| One-touch pool selection for up to three predefined pools | ✅ ACTIVE |
 
 ---
 
@@ -61,8 +61,6 @@ Version 1.2.0 adds Goldshell Byte support with dual-algorithm ALEO and LTC monit
 2. Restart Home Assistant.
 3. Open **Settings** → **Devices & Services** → **Add Integration**.
 4. Search for **Crypto Miner Fleet Monitor**.
-
-The folder name remains `axeos` for compatibility with existing installs and entity IDs.
 
 ---
 
@@ -140,8 +138,6 @@ Updates the active pool settings on a miner.
 
 This service is intended for miner types that support writable pool configuration. Goldshell pool entities are read-only and are not controlled through this service.
 
-The service name remains `axeos.set_pool` for backward compatibility.
-
 ```yaml
 service: axeos.set_pool
 data:
@@ -177,7 +173,7 @@ For standard miners like Bitaxe, NerdAxe, and Avalon, the card-ready entity suff
 | Card input | Entity suffix |
 |---|---|
 | Title / miner label | `hostname` or device name |
-| Miner link target | `ipv4_address` |
+| Miner IP | `ipv4_address` |
 | Hashrate | `hashrate` |
 | Temperature | `temp_asic` |
 | Overheat state | `overheated` |
