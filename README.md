@@ -15,7 +15,7 @@
  ██║ ╚═╝ ██║╚██████╔╝██║ ╚████║██║   ██║   ╚██████╔╝██║  ██║
  ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝
 
-      TRACK YOUR MINERS  >>>  ₿₿₿
+      TRACK YOUR MINERS  >>>  READY
 ```
 
 > **PLAYER ONE — YOUR MINERS ARE NOW IN HOME ASSISTANT.**
@@ -226,3 +226,14 @@ If you want the card and integration to feel like one system, this is the backen
 ---
 
 *GAME OVER? Not here. The fleet stays online.*
+
+## ₿ SUPPORT THE DEV — INSERT COIN FOR REAL
+
+If this intergration saved you time, made your dashboard look sick, or your miner just hit a new all-time best difficulty — buy the dev a satoshi.
+
+**Bitcoin:** `bc1qqa5weng9wh682vcas6a8c8jqw43t4hnt8f7ks9`
+
+**Bitcoin Cash:** `qzcv0zwwguz0z9j0v8nd8yp4rxuqpadtegmr09tmer`
+
+```
+  ⣿⣿⣿⣿⣿ THANK YOU FOR PLAYING ⣿⣿⣿⣿⣿
