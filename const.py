@@ -65,6 +65,13 @@ AVALON_OVERHEAT_THRESHOLD_MIN_C = 70.0
 AVALON_OVERHEAT_THRESHOLD_MAX_C = 95.0
 AVALON_OVERHEAT_THRESHOLD_DEFAULT_C = 80.0
 
+GOLDSHELL_OVERHEAT_THRESHOLD_MIN_C = 55.0
+GOLDSHELL_OVERHEAT_THRESHOLD_MAX_C = 98.0
+GOLDSHELL_OVERHEAT_THRESHOLD_DEFAULT_C = 65.0
+
+# Goldshell fan speed defaults (RPM)
+GOLDSHELL_FAN_MAX_RPM = 5500
+
 
 def overheat_threshold_profile(miner_type: str) -> tuple[float, float, float]:
 	"""Return (min, max, default) overheat threshold profile by miner type."""
@@ -73,6 +80,12 @@ def overheat_threshold_profile(miner_type: str) -> tuple[float, float, float]:
 			AVALON_OVERHEAT_THRESHOLD_MIN_C,
 			AVALON_OVERHEAT_THRESHOLD_MAX_C,
 			AVALON_OVERHEAT_THRESHOLD_DEFAULT_C,
+		)
+	if miner_type == MINER_TYPE_GOLDSHELL:
+		return (
+			GOLDSHELL_OVERHEAT_THRESHOLD_MIN_C,
+			GOLDSHELL_OVERHEAT_THRESHOLD_MAX_C,
+			GOLDSHELL_OVERHEAT_THRESHOLD_DEFAULT_C,
 		)
 	return (
 		OVERHEAT_THRESHOLD_MIN_C,

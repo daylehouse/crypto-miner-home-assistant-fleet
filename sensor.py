@@ -334,7 +334,9 @@ SENSOR_ICONS: dict[str, str] = {
     "ltc_temp_1": "mdi:thermometer",
     "ltc_temp_2": "mdi:thermometer",
     "aleo_fan_rpm": "mdi:fan-speed-3",
+    "aleo_fan_speed": "mdi:fan",
     "ltc_fan_rpm": "mdi:fan-speed-3",
+    "ltc_fan_speed": "mdi:fan",
     "aleo_shares_accepted": "mdi:check-circle-outline",
     "ltc_shares_accepted": "mdi:check-circle-outline",
     "aleo_shares_rejected": "mdi:close-circle-outline",
@@ -777,6 +779,18 @@ def _goldshell_parse_fanrpm(data: dict[str, Any]) -> int | None:
         return None
 
 
+def _goldshell_fan_rpm_percentage(data: dict[str, Any], max_rpm: int = 5500) -> float:
+    """Calculate fan speed as a percentage of max RPM."""
+    try:
+        rpm = _goldshell_parse_fanrpm(data)
+        if rpm is None or rpm < 0:
+            return 0.0
+        percentage = (rpm / max_rpm) * 100.0
+        return round(min(percentage, 100.0), 2)  # Cap at 100%
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
 def _goldshell_mining_active(payload: dict[str, Any]) -> int:
     """Return 1 when either Goldshell card has positive hashrate, else 0."""
     info = payload.get("info", {}) if isinstance(payload, dict) else {}
@@ -951,6 +965,16 @@ GOLDSHELL_SENSORS: list[BitaxeSensorEntityDescription] = [
         ),
     ),
     BitaxeSensorEntityDescription(
+        key="aleo_fan_speed",
+        name="ALEO Fan Speed",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_fan_rpm_percentage(
+            _goldshell_get_coin_data(data.get("info", {}), 0)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
         key="aleo_shares_accepted",
         name="ALEO Shares Accepted",
         state_class=SensorStateClass.TOTAL_INCREASING,
@@ -1073,6 +1097,16 @@ GOLDSHELL_SENSORS: list[BitaxeSensorEntityDescription] = [
         native_unit_of_measurement="rpm",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda data: _goldshell_parse_fanrpm(
+            _goldshell_get_coin_data(data.get("info", {}), 1)
+        ),
+    ),
+    BitaxeSensorEntityDescription(
+        key="ltc_fan_speed",
+        name="LTC Fan Speed",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _goldshell_fan_rpm_percentage(
             _goldshell_get_coin_data(data.get("info", {}), 1)
         ),
     ),
