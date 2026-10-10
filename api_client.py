@@ -26,6 +26,49 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _first_numeric(info: Dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    """Return first numeric value found in info for any candidate key."""
+    for key in keys:
+        raw = info.get(key)
+        if raw is None:
+            continue
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+NERDAXE_ASIC_SHUTDOWN_KEYS: tuple[str, ...] = (
+    "shutdownTempAsic",
+    "shutdownTempASIC",
+    "shutdownTempAsics",
+    "shutdownTemp",
+    "shutdown_temp",
+    "asicShutdownTemp",
+    "asic_shutdown",
+    "asic_shutdown_temp",
+    "shutdown_temp_asic",
+    "overheatTempAsic",
+    "overheat_temp_asic",
+)
+
+NERDAXE_VR_SHUTDOWN_KEYS: tuple[str, ...] = (
+    "vrShutdownTemp",
+    "vrShutdownTemperature",
+    "shutdownTempVr",
+    "shutdownTempVR",
+    "vr_shutdown_temp",
+    "shutdown_temp_vr",
+    "voltageRegulatorShutdownTemp",
+    "voltageRegulatorShutdownTemperature",
+    "voltage_regulator_shutdown_temp",
+    "vregShutdownTemp",
+    "overheatTempVr",
+    "overheat_temp_vr",
+)
+
+
 class BitaxeAPIClient:
     """API client for Bitaxe/NerdAxe (HTTP) and Avalon (CGMiner socket)."""
 
@@ -270,44 +313,59 @@ class BitaxeAPIClient:
                 f"Unsupported miner type for NerdAxe shutdown thresholds: {self.miner_type}"
             )
 
-        payload: Dict[str, Any] = {}
+        if asic_shutdown_c is None and vr_shutdown_c is None:
+            raise ValueError("At least one NerdAxe shutdown threshold must be provided")
+
+        resolved_timeout = timeout or DEFAULT_TIMEOUT
+        last_response: Dict[str, Any] = {}
+
+        async def _verify_value(keys: tuple[str, ...], expected: int) -> bool:
+            try:
+                info_payload = await self.get_system_info(timeout=resolved_timeout)
+            except Exception:
+                # If read-back fails, do not block successful writes on verification.
+                return True
+
+            if not isinstance(info_payload, dict):
+                return True
+
+            observed = _first_numeric(info_payload, keys)
+            if observed is None:
+                return False
+
+            return int(round(observed)) == expected
+
+        async def _apply_field(candidates: tuple[str, ...], value: int) -> Dict[str, Any]:
+            last_error: Exception | None = None
+
+            for key in candidates:
+                try:
+                    response = await self._async_request(
+                        "PATCH",
+                        API_SYSTEM,
+                        json_payload={key: value},
+                        timeout=resolved_timeout,
+                    )
+                except (TimeoutError, ConnectionError, ValueError) as err:
+                    last_error = err
+                    continue
+
+                if await _verify_value(candidates, value):
+                    return response
+
+            if last_error:
+                raise last_error
+            raise ValueError("NerdAxe API did not apply shutdown threshold update")
 
         if asic_shutdown_c is not None:
             asic_value = int(round(float(asic_shutdown_c)))
-            payload.update(
-                {
-                    "shutdownTempAsic": asic_value,
-                    "shutdownTempASIC": asic_value,
-                    "shutdownTemp": asic_value,
-                    "asicShutdownTemp": asic_value,
-                    "asic_shutdown_temp": asic_value,
-                    "overheatTempAsic": asic_value,
-                    "overheat_temp_asic": asic_value,
-                }
-            )
+            last_response = await _apply_field(NERDAXE_ASIC_SHUTDOWN_KEYS, asic_value)
 
         if vr_shutdown_c is not None:
             vr_value = int(round(float(vr_shutdown_c)))
-            payload.update(
-                {
-                    "vrShutdownTemp": vr_value,
-                    "vr_shutdown_temp": vr_value,
-                    "voltageRegulatorShutdownTemp": vr_value,
-                    "vregShutdownTemp": vr_value,
-                    "overheatTempVr": vr_value,
-                    "overheat_temp_vr": vr_value,
-                }
-            )
+            last_response = await _apply_field(NERDAXE_VR_SHUTDOWN_KEYS, vr_value)
 
-        if not payload:
-            raise ValueError("At least one NerdAxe shutdown threshold must be provided")
-
-        return await self._async_request(
-            "PATCH",
-            API_SYSTEM,
-            json_payload=payload,
-            timeout=timeout or DEFAULT_TIMEOUT,
-        )
+        return last_response
 
     async def _avalon_system_info(self, timeout: float) -> Dict[str, Any]:
         """Fetch and normalize Avalon runtime data to axeos info schema."""
