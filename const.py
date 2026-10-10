@@ -22,6 +22,7 @@ CONF_POOLS = "pools"
 CONF_ENTRY_TYPE = "entry_type"
 # Legacy ASIC threshold key (kept for backward compatibility)
 CONF_OVERHEAT_THRESHOLD_C = "overheat_threshold_c"
+CONF_TARGET_TEMP_C = "target_temp_c"
 CONF_ASIC_OVERHEAT_THRESHOLD_C = "asic_overheat_threshold_c"
 CONF_VR_OVERHEAT_THRESHOLD_C = "vr_overheat_threshold_c"
 # Preferred Goldshell per-card threshold keys

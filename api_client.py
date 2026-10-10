@@ -70,6 +70,13 @@ NERDAXE_VR_SHUTDOWN_KEYS: tuple[str, ...] = (
     "overheat_temp_vr",
 )
 
+NERDAXE_TARGET_TEMP_KEYS: tuple[str, ...] = (
+    "pidTargetTemp",
+    "pid_target_temp",
+    "targetTemp",
+    "target_temp",
+)
+
 
 class BitaxeAPIClient:
     """API client for Bitaxe/NerdAxe (HTTP) and Avalon (CGMiner socket)."""
@@ -296,6 +303,25 @@ class BitaxeAPIClient:
             )
 
         payload = {"temptarget": int(round(float(target_c)))}
+        return await self._async_request(
+            "PATCH",
+            API_SYSTEM,
+            json_payload=payload,
+            timeout=timeout or DEFAULT_TIMEOUT,
+        )
+
+    async def set_nerdaxe_target_temperature(
+        self,
+        target_c: int | float,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Set NerdAxe PID target temperature via PATCH /api/system."""
+        if self.miner_type != MINER_TYPE_NERDAXE:
+            raise ValueError(
+                f"Unsupported miner type for NerdAxe target temperature: {self.miner_type}"
+            )
+
+        payload = {"pidTargetTemp": int(round(float(target_c)))}
         return await self._async_request(
             "PATCH",
             API_SYSTEM,

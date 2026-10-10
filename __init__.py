@@ -22,6 +22,7 @@ from .const import (
     CONF_HOST,
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
+    CONF_TARGET_TEMP_C,
     CONF_POOLS,
     CONF_VR_OVERHEAT_THRESHOLD_C,
     CONF_AVALON_USERNAME,
@@ -370,6 +371,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             threshold_default,
         )
     )
+    target_temp = float(entry.options.get(CONF_TARGET_TEMP_C, threshold_default))
     goldshell_temp1_threshold = float(
         entry.options.get(
             CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
@@ -398,26 +400,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if miner_type == MINER_TYPE_BITAXE:
                 api_target = _api_bitaxe_temperature_target_c(info)
                 if api_target is not None:
-                    asic_threshold = float(api_target)
-                    vr_threshold = float(api_target)
-                    options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = asic_threshold
-                    options[CONF_VR_OVERHEAT_THRESHOLD_C] = vr_threshold
-                    options[CONF_OVERHEAT_THRESHOLD_C] = asic_threshold
+                    target_temp = float(api_target)
+                    options[CONF_TARGET_TEMP_C] = target_temp
                     options_changed = True
 
             if miner_type == MINER_TYPE_NERDAXE:
-                asic_api_target = _api_nerdaxe_asic_shutdown_temp_c(info)
-                vr_api_target = _api_nerdaxe_vr_shutdown_temp_c(info)
-
-                if asic_api_target is not None:
-                    asic_threshold = float(asic_api_target)
-                    options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = asic_threshold
-                    options[CONF_OVERHEAT_THRESHOLD_C] = asic_threshold
-                    options_changed = True
-
-                if vr_api_target is not None:
-                    vr_threshold = float(vr_api_target)
-                    options[CONF_VR_OVERHEAT_THRESHOLD_C] = vr_threshold
+                api_target = _api_nerdaxe_target_temp_c(info)
+                if api_target is not None:
+                    target_temp = float(api_target)
+                    options[CONF_TARGET_TEMP_C] = target_temp
                     options_changed = True
 
             if options_changed and options != entry.options:
@@ -432,6 +423,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_name": entry.data.get(CONF_DEVICE_NAME, device_name),
         "device_slug": entry.data.get(CONF_DEVICE_SLUG, device_slug),
         "pools": entry.data.get(CONF_POOLS, []),
+        CONF_TARGET_TEMP_C: target_temp,
         CONF_OVERHEAT_THRESHOLD_C: asic_threshold,
         CONF_ASIC_OVERHEAT_THRESHOLD_C: asic_threshold,
         CONF_VR_OVERHEAT_THRESHOLD_C: vr_threshold,
