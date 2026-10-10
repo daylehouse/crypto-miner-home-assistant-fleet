@@ -1,5 +1,6 @@
 """Config flow for Bitaxe/NerdAxe/Avalon/Goldshell integration."""
 
+import ipaddress
 import logging
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -80,22 +81,45 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return None
 
     @staticmethod
-    def _discovered_device_name(
-        info: dict[str, Any], host: str, miner_type: str
-    ) -> str:
-        """Build display name using discovered hostname when available."""
-        hostname = info.get("hostname")
-        if isinstance(hostname, str) and hostname.strip():
-            return f"{miner_type.capitalize()} {hostname.strip()}"
-        return f"{miner_type.capitalize()} {host}"
+    def _is_ip_address(value: str) -> bool:
+        """Return True when value is a valid IPv4/IPv6 address."""
+        try:
+            ipaddress.ip_address(value.strip())
+        except ValueError:
+            return False
+        return True
 
-    @staticmethod
-    def _discovered_device_slug(info: dict[str, Any], host: str) -> str:
-        """Build normalized slug using discovered hostname when available."""
-        hostname = info.get("hostname")
-        if isinstance(hostname, str) and hostname.strip():
-            return normalize_identifier(hostname)
-        return normalize_identifier(host)
+    @classmethod
+    def _preferred_device_host(cls, info: dict[str, Any], host: str) -> str:
+        """Return preferred identity host, favoring configured hostnames over IPs."""
+        configured_host = host.strip()
+        discovered_host = info.get("hostname")
+        if not isinstance(discovered_host, str) or not discovered_host.strip():
+            return configured_host
+
+        discovered_host = discovered_host.strip()
+        if (
+            cls._is_ip_address(discovered_host)
+            and configured_host
+            and not cls._is_ip_address(configured_host)
+        ):
+            return configured_host
+
+        return discovered_host
+
+    @classmethod
+    def _discovered_device_name(
+        cls, info: dict[str, Any], host: str, miner_type: str
+    ) -> str:
+        """Build display name using preferred discovered/configured identity."""
+        preferred_host = cls._preferred_device_host(info, host)
+        return f"{miner_type.capitalize()} {preferred_host}"
+
+    @classmethod
+    def _discovered_device_slug(cls, info: dict[str, Any], host: str) -> str:
+        """Build normalized slug using preferred discovered/configured identity."""
+        preferred_host = cls._preferred_device_host(info, host)
+        return normalize_identifier(preferred_host)
 
     async def _async_validate_and_fetch_info(
         self,

@@ -1,11 +1,13 @@
 """The Bitaxe/NerdAxe integration."""
 
+import ipaddress
 import logging
 from urllib.parse import urlparse
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import format_mac
 
 from .api_client import BitaxeAPIClient
 from .const import (
@@ -50,6 +52,114 @@ def _normalize_host(raw_host: str) -> str:
 def _entry_type(entry: ConfigEntry) -> str:
     """Return entry type with backward-compatible default."""
     return entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_MINER)
+
+
+def _is_ip_address(value: str) -> bool:
+    """Return True when value is a valid IPv4/IPv6 address."""
+    try:
+        ipaddress.ip_address(value.strip())
+    except ValueError:
+        return False
+    return True
+
+
+def _preferred_device_host(configured_host: str, discovered_host: str | None) -> str:
+    """Prefer configured hostname when discovery only returns an IP address."""
+    configured_host = configured_host.strip()
+    if not isinstance(discovered_host, str) or not discovered_host.strip():
+        return configured_host
+
+    discovered_host = discovered_host.strip()
+    if (
+        _is_ip_address(discovered_host)
+        and configured_host
+        and not _is_ip_address(configured_host)
+    ):
+        return configured_host
+
+    return discovered_host
+
+
+def _is_hostname(value: str) -> bool:
+    """Return True when value looks like a hostname rather than an IP."""
+    return bool(value and not _is_ip_address(value))
+
+
+def _normalized_entry_host(entry: ConfigEntry) -> str:
+    """Return normalized host value from a config entry."""
+    return _normalize_host(str(entry.data.get(CONF_HOST, "")))
+
+
+def _is_miner_entry(entry: ConfigEntry) -> bool:
+    """Return True for miner entries (not fleet entries)."""
+    return _entry_type(entry) == ENTRY_TYPE_MINER
+
+
+async def _async_cleanup_duplicate_ip_entries(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    host: str,
+    discovered_hostname: str | None,
+    unique_id: str | None,
+) -> bool:
+    """Remove duplicate IP-based entries when a hostname entry exists.
+
+    Returns True when the current entry was removed and setup should stop.
+    """
+    if not isinstance(discovered_hostname, str) or not discovered_hostname.strip():
+        return False
+
+    discovered_hostname = discovered_hostname.strip()
+    if not _is_hostname(discovered_hostname):
+        return False
+
+    current_host = host.strip()
+    all_entries = [e for e in hass.config_entries.async_entries(DOMAIN) if _is_miner_entry(e)]
+
+    # If current entry is IP-based and we already have the hostname entry,
+    # remove current IP entry and keep the hostname as canonical.
+    if _is_ip_address(current_host):
+        hostname_entries = [
+            other
+            for other in all_entries
+            if other.entry_id != entry.entry_id
+            and _normalized_entry_host(other) == discovered_hostname
+        ]
+
+        if not hostname_entries:
+            return False
+
+        if unique_id:
+            same_unique_id_match = any(other.unique_id == unique_id for other in hostname_entries)
+            any_unset_unique_id = any(not other.unique_id for other in hostname_entries)
+            if not same_unique_id_match and not any_unset_unique_id:
+                return False
+
+        _LOGGER.info(
+            "Removing duplicate IP entry %s (%s); hostname entry already exists for %s",
+            entry.entry_id,
+            current_host,
+            discovered_hostname,
+        )
+        await hass.config_entries.async_remove(entry.entry_id)
+        return True
+
+    # If current entry is hostname-based, remove any IP duplicates with same unique ID.
+    if _is_hostname(current_host) and unique_id:
+        for other in all_entries:
+            if other.entry_id == entry.entry_id:
+                continue
+            other_host = _normalized_entry_host(other)
+            if _is_ip_address(other_host) and other.unique_id == unique_id:
+                _LOGGER.info(
+                    "Removing duplicate IP entry %s (%s) in favor of hostname %s",
+                    other.entry_id,
+                    other_host,
+                    current_host,
+                )
+                await hass.config_entries.async_remove(other.entry_id)
+
+    return False
 
 
 def _has_runtime_miner_entries(hass: HomeAssistant) -> bool:
@@ -120,15 +230,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initial data fetch
     await coordinator.async_config_entry_first_refresh()
 
+    discovered_mac = coordinator.data.get("info", {}).get("macAddr")
+    resolved_unique_id = entry.unique_id
+    if isinstance(discovered_mac, str) and discovered_mac.strip():
+        try:
+            normalized_mac = format_mac(discovered_mac)
+            resolved_unique_id = normalized_mac
+            if entry.unique_id != normalized_mac:
+                hass.config_entries.async_update_entry(entry, unique_id=normalized_mac)
+        except ValueError:
+            _LOGGER.debug("Invalid discovered macAddr for entry %s: %s", entry.entry_id, discovered_mac)
+
     # Prefer discovered hostname for UI/device naming, with fallback to host.
     discovered_hostname = coordinator.data.get("info", {}).get("hostname")
-    if isinstance(discovered_hostname, str) and discovered_hostname.strip():
-        cleaned_hostname = discovered_hostname.strip()
-        device_name = f"{miner_type.capitalize()} {cleaned_hostname}"
-        device_slug = normalize_identifier(cleaned_hostname)
-    else:
-        device_name = f"{miner_type.capitalize()} {host}"
-        device_slug = normalize_identifier(host)
+    removed_current_entry = await _async_cleanup_duplicate_ip_entries(
+        hass,
+        entry,
+        host,
+        discovered_hostname if isinstance(discovered_hostname, str) else None,
+        resolved_unique_id,
+    )
+    if removed_current_entry:
+        return True
+
+    preferred_host = _preferred_device_host(host, discovered_hostname)
+    device_name = f"{miner_type.capitalize()} {preferred_host}"
+    device_slug = normalize_identifier(preferred_host)
 
     if (
         entry.data.get(CONF_DEVICE_NAME) != device_name
