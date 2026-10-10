@@ -36,9 +36,9 @@ from .const import (
 from .utils import normalize_identifier
 
 
-def _api_temperature_target_c(info: dict[str, Any]) -> float | None:
-    """Return Bitaxe/NerdAxe temp target from API payload when available."""
-    for key in ("temptarget", "tempTarget", "temp_target"):
+def _api_first_numeric(info: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    """Return first numeric value found in info for any candidate key."""
+    for key in keys:
         raw = info.get(key)
         if raw is None:
             continue
@@ -49,9 +49,50 @@ def _api_temperature_target_c(info: dict[str, Any]) -> float | None:
     return None
 
 
-def _is_bitaxe_family(miner_type: str) -> bool:
-    """Return True for Bitaxe/NerdAxe miners."""
-    return miner_type in (MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE)
+def _api_bitaxe_temperature_target_c(info: dict[str, Any]) -> float | None:
+    """Return Bitaxe target temperature from API payload when available."""
+    return _api_first_numeric(info, ("temptarget", "tempTarget", "temp_target"))
+
+
+def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, Any]) -> float | None:
+    """Return NerdAxe ASIC shutdown threshold from API payload when available."""
+    return _api_first_numeric(
+        info,
+        (
+            "shutdownTempAsic",
+            "shutdownTempASIC",
+            "shutdownTemp",
+            "asicShutdownTemp",
+            "asic_shutdown_temp",
+            "overheatTempAsic",
+            "overheat_temp_asic",
+        ),
+    )
+
+
+def _api_nerdaxe_vr_shutdown_temp_c(info: dict[str, Any]) -> float | None:
+    """Return NerdAxe VR shutdown threshold from API payload when available."""
+    return _api_first_numeric(
+        info,
+        (
+            "vrShutdownTemp",
+            "vr_shutdown_temp",
+            "voltageRegulatorShutdownTemp",
+            "vregShutdownTemp",
+            "overheatTempVr",
+            "overheat_temp_vr",
+        ),
+    )
+
+
+def _is_bitaxe_miner(miner_type: str) -> bool:
+    """Return True for Bitaxe miners."""
+    return miner_type == MINER_TYPE_BITAXE
+
+
+def _is_nerdaxe_miner(miner_type: str) -> bool:
+    """Return True for NerdAxe miners."""
+    return miner_type == MINER_TYPE_NERDAXE
 
 
 def _cleanup_legacy_goldshell_number_entities(hass: HomeAssistant, entry_id: str) -> None:
@@ -90,11 +131,17 @@ async def async_setup_entry(
     if not isinstance(api_client, BitaxeAPIClient):
         api_client = None
 
-    api_target: float | None = None
-    if _is_bitaxe_family(miner_type) and coordinator and isinstance(coordinator.data, dict):
+    bitaxe_target: float | None = None
+    nerdaxe_asic_target: float | None = None
+    nerdaxe_vr_target: float | None = None
+    if (_is_bitaxe_miner(miner_type) or _is_nerdaxe_miner(miner_type)) and coordinator and isinstance(coordinator.data, dict):
         info = coordinator.data.get("info", {})
         if isinstance(info, dict):
-            api_target = _api_temperature_target_c(info)
+            if _is_bitaxe_miner(miner_type):
+                bitaxe_target = _api_bitaxe_temperature_target_c(info)
+            if _is_nerdaxe_miner(miner_type):
+                nerdaxe_asic_target = _api_nerdaxe_asic_shutdown_temp_c(info)
+                nerdaxe_vr_target = _api_nerdaxe_vr_shutdown_temp_c(info)
 
     if miner_type == MINER_TYPE_GOLDSHELL:
         _cleanup_legacy_goldshell_number_entities(hass, config_entry.entry_id)
@@ -178,9 +225,13 @@ async def async_setup_entry(
             )
         )
 
-        if api_target is not None:
-            current_asic_value = float(api_target)
-            current_vr_value = float(api_target)
+        if bitaxe_target is not None:
+            current_asic_value = float(bitaxe_target)
+            current_vr_value = float(bitaxe_target)
+        if nerdaxe_asic_target is not None:
+            current_asic_value = float(nerdaxe_asic_target)
+        if nerdaxe_vr_target is not None:
+            current_vr_value = float(nerdaxe_vr_target)
 
         entities.extend(
             [
@@ -274,10 +325,13 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
     @property
     def _is_api_backed_target(self) -> bool:
         """Return True when this slider should mirror the miner API target."""
-        return _is_bitaxe_family(self._miner_type) and self._threshold_key in {
+        return (
+            (_is_bitaxe_miner(self._miner_type) or _is_nerdaxe_miner(self._miner_type))
+            and self._threshold_key in {
             CONF_ASIC_OVERHEAT_THRESHOLD_C,
             CONF_VR_OVERHEAT_THRESHOLD_C,
-        }
+            }
+        )
 
     def _api_target_from_coordinator(self) -> float | None:
         """Read current target temperature from coordinator cache."""
@@ -287,7 +341,16 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
         if not isinstance(info, dict):
             return None
 
-        value = _api_temperature_target_c(info)
+        if _is_bitaxe_miner(self._miner_type):
+            value = _api_bitaxe_temperature_target_c(info)
+        elif _is_nerdaxe_miner(self._miner_type):
+            if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                value = _api_nerdaxe_asic_shutdown_temp_c(info)
+            else:
+                value = _api_nerdaxe_vr_shutdown_temp_c(info)
+        else:
+            value = None
+
         if value is None:
             return None
         return float(max(self._attr_native_min_value, min(self._attr_native_max_value, value)))
@@ -329,10 +392,24 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
                 raise HomeAssistantError("Miner API client is unavailable")
 
             try:
-                await api_client.set_temperature_target(
-                    self._attr_native_value,
-                    timeout=CONNECTION_TIMEOUT,
-                )
+                if _is_bitaxe_miner(self._miner_type):
+                    await api_client.set_temperature_target(
+                        self._attr_native_value,
+                        timeout=CONNECTION_TIMEOUT,
+                    )
+                elif _is_nerdaxe_miner(self._miner_type):
+                    if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                        await api_client.set_nerdaxe_shutdown_temperatures(
+                            asic_shutdown_c=self._attr_native_value,
+                            timeout=CONNECTION_TIMEOUT,
+                        )
+                    else:
+                        await api_client.set_nerdaxe_shutdown_temperatures(
+                            vr_shutdown_c=self._attr_native_value,
+                            timeout=CONNECTION_TIMEOUT,
+                        )
+                else:
+                    raise HomeAssistantError("Unsupported miner type for API-backed threshold")
             except (TimeoutError, ConnectionError, ValueError) as err:
                 raise HomeAssistantError(
                     f"Failed to update miner temperature target: {err}"
@@ -341,15 +418,26 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
             if self._coordinator and isinstance(self._coordinator.data, dict):
                 current_data = dict(self._coordinator.data)
                 info = dict(current_data.get("info") or {})
-                info["temptarget"] = self._attr_native_value
+                if _is_bitaxe_miner(self._miner_type):
+                    info["temptarget"] = self._attr_native_value
+                elif _is_nerdaxe_miner(self._miner_type):
+                    if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                        info["shutdownTempAsic"] = self._attr_native_value
+                    else:
+                        info["vrShutdownTemp"] = self._attr_native_value
                 current_data["info"] = info
                 self._coordinator.async_set_updated_data(current_data)
 
         current_options = dict(self._config_entry.options)
         if self._is_api_backed_target:
-            current_options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-            current_options[CONF_VR_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-            current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+            if _is_bitaxe_miner(self._miner_type):
+                current_options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                current_options[CONF_VR_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+            else:
+                current_options[self._threshold_key] = self._attr_native_value
+                if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                    current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
         else:
             current_options[self._threshold_key] = self._attr_native_value
             if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
@@ -364,9 +452,14 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
         runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if isinstance(runtime_entry, dict):
             if self._is_api_backed_target:
-                runtime_entry[CONF_ASIC_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-                runtime_entry[CONF_VR_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-                runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                if _is_bitaxe_miner(self._miner_type):
+                    runtime_entry[CONF_ASIC_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                    runtime_entry[CONF_VR_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                    runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                else:
+                    runtime_entry[self._threshold_key] = self._attr_native_value
+                    if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                        runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
             else:
                 runtime_entry[self._threshold_key] = self._attr_native_value
                 if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:

@@ -245,12 +245,63 @@ class BitaxeAPIClient:
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Set Bitaxe/NerdAxe automatic fan target temperature via PATCH /api/system."""
-        if self.miner_type not in (MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE):
+        if self.miner_type != MINER_TYPE_BITAXE:
             raise ValueError(
                 f"Unsupported miner type for temperature target: {self.miner_type}"
             )
 
         payload = {"temptarget": int(round(float(target_c)))}
+        return await self._async_request(
+            "PATCH",
+            API_SYSTEM,
+            json_payload=payload,
+            timeout=timeout or DEFAULT_TIMEOUT,
+        )
+
+    async def set_nerdaxe_shutdown_temperatures(
+        self,
+        asic_shutdown_c: int | float | None = None,
+        vr_shutdown_c: int | float | None = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Set NerdAxe ASIC/VR shutdown temperatures via PATCH /api/system."""
+        if self.miner_type != MINER_TYPE_NERDAXE:
+            raise ValueError(
+                f"Unsupported miner type for NerdAxe shutdown thresholds: {self.miner_type}"
+            )
+
+        payload: Dict[str, Any] = {}
+
+        if asic_shutdown_c is not None:
+            asic_value = int(round(float(asic_shutdown_c)))
+            payload.update(
+                {
+                    "shutdownTempAsic": asic_value,
+                    "shutdownTempASIC": asic_value,
+                    "shutdownTemp": asic_value,
+                    "asicShutdownTemp": asic_value,
+                    "asic_shutdown_temp": asic_value,
+                    "overheatTempAsic": asic_value,
+                    "overheat_temp_asic": asic_value,
+                }
+            )
+
+        if vr_shutdown_c is not None:
+            vr_value = int(round(float(vr_shutdown_c)))
+            payload.update(
+                {
+                    "vrShutdownTemp": vr_value,
+                    "vr_shutdown_temp": vr_value,
+                    "voltageRegulatorShutdownTemp": vr_value,
+                    "vregShutdownTemp": vr_value,
+                    "overheatTempVr": vr_value,
+                    "overheat_temp_vr": vr_value,
+                }
+            )
+
+        if not payload:
+            raise ValueError("At least one NerdAxe shutdown threshold must be provided")
+
         return await self._async_request(
             "PATCH",
             API_SYSTEM,

@@ -97,9 +97,9 @@ def _is_miner_entry(entry: ConfigEntry) -> bool:
     return _entry_type(entry) == ENTRY_TYPE_MINER
 
 
-def _api_temperature_target_c(info: dict[str, object]) -> float | None:
-    """Return Bitaxe/NerdAxe temp target from API payload when available."""
-    for key in ("temptarget", "tempTarget", "temp_target"):
+def _api_first_numeric(info: dict[str, object], keys: tuple[str, ...]) -> float | None:
+    """Return first numeric value found in info for any candidate key."""
+    for key in keys:
         raw = info.get(key)
         if raw is None:
             continue
@@ -108,6 +108,42 @@ def _api_temperature_target_c(info: dict[str, object]) -> float | None:
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _api_bitaxe_temperature_target_c(info: dict[str, object]) -> float | None:
+    """Return Bitaxe temp target from API payload when available."""
+    return _api_first_numeric(info, ("temptarget", "tempTarget", "temp_target"))
+
+
+def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, object]) -> float | None:
+    """Return NerdAxe ASIC shutdown threshold from API payload when available."""
+    return _api_first_numeric(
+        info,
+        (
+            "shutdownTempAsic",
+            "shutdownTempASIC",
+            "shutdownTemp",
+            "asicShutdownTemp",
+            "asic_shutdown_temp",
+            "overheatTempAsic",
+            "overheat_temp_asic",
+        ),
+    )
+
+
+def _api_nerdaxe_vr_shutdown_temp_c(info: dict[str, object]) -> float | None:
+    """Return NerdAxe VR shutdown threshold from API payload when available."""
+    return _api_first_numeric(
+        info,
+        (
+            "vrShutdownTemp",
+            "vr_shutdown_temp",
+            "voltageRegulatorShutdownTemp",
+            "vregShutdownTemp",
+            "overheatTempVr",
+            "overheat_temp_vr",
+        ),
+    )
 
 
 async def _async_cleanup_duplicate_ip_entries(
@@ -328,18 +364,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if miner_type in (MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE):
         info = coordinator.data.get("info", {}) if coordinator.data else {}
         if isinstance(info, dict):
-            api_target = _api_temperature_target_c(info)
-            if api_target is not None:
-                asic_threshold = float(api_target)
-                vr_threshold = float(api_target)
+            options = dict(entry.options)
+            options_changed = False
 
-                # Persist API-backed target as local fallback values.
-                options = dict(entry.options)
-                options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = asic_threshold
-                options[CONF_VR_OVERHEAT_THRESHOLD_C] = vr_threshold
-                options[CONF_OVERHEAT_THRESHOLD_C] = asic_threshold
-                if options != entry.options:
-                    hass.config_entries.async_update_entry(entry, options=options)
+            if miner_type == MINER_TYPE_BITAXE:
+                api_target = _api_bitaxe_temperature_target_c(info)
+                if api_target is not None:
+                    asic_threshold = float(api_target)
+                    vr_threshold = float(api_target)
+                    options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = asic_threshold
+                    options[CONF_VR_OVERHEAT_THRESHOLD_C] = vr_threshold
+                    options[CONF_OVERHEAT_THRESHOLD_C] = asic_threshold
+                    options_changed = True
+
+            if miner_type == MINER_TYPE_NERDAXE:
+                asic_api_target = _api_nerdaxe_asic_shutdown_temp_c(info)
+                vr_api_target = _api_nerdaxe_vr_shutdown_temp_c(info)
+
+                if asic_api_target is not None:
+                    asic_threshold = float(asic_api_target)
+                    options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = asic_threshold
+                    options[CONF_OVERHEAT_THRESHOLD_C] = asic_threshold
+                    options_changed = True
+
+                if vr_api_target is not None:
+                    vr_threshold = float(vr_api_target)
+                    options[CONF_VR_OVERHEAT_THRESHOLD_C] = vr_threshold
+                    options_changed = True
+
+            if options_changed and options != entry.options:
+                hass.config_entries.async_update_entry(entry, options=options)
 
     hass.data[DOMAIN][entry.entry_id] = {
         "entry_type": ENTRY_TYPE_MINER,
