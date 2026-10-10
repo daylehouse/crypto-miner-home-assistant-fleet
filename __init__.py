@@ -29,6 +29,8 @@ from .const import (
     DOMAIN,
     ENTRY_TYPE_FLEET,
     ENTRY_TYPE_MINER,
+    MINER_TYPE_BITAXE,
+    MINER_TYPE_NERDAXE,
     PLATFORMS_FLEET,
     PLATFORMS_MINER,
     overheat_threshold_profile,
@@ -93,6 +95,19 @@ def _normalized_entry_host(entry: ConfigEntry) -> str:
 def _is_miner_entry(entry: ConfigEntry) -> bool:
     """Return True for miner entries (not fleet entries)."""
     return _entry_type(entry) == ENTRY_TYPE_MINER
+
+
+def _api_temperature_target_c(info: dict[str, object]) -> float | None:
+    """Return Bitaxe/NerdAxe temp target from API payload when available."""
+    for key in ("temptarget", "tempTarget", "temp_target"):
+        raw = info.get(key)
+        if raw is None:
+            continue
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 async def _async_cleanup_duplicate_ip_entries(
@@ -309,6 +324,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ),
         )
     )
+
+    if miner_type in (MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE):
+        info = coordinator.data.get("info", {}) if coordinator.data else {}
+        if isinstance(info, dict):
+            api_target = _api_temperature_target_c(info)
+            if api_target is not None:
+                asic_threshold = float(api_target)
+                vr_threshold = float(api_target)
+
+                # Persist API-backed target as local fallback values.
+                options = dict(entry.options)
+                options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = asic_threshold
+                options[CONF_VR_OVERHEAT_THRESHOLD_C] = vr_threshold
+                options[CONF_OVERHEAT_THRESHOLD_C] = asic_threshold
+                if options != entry.options:
+                    hass.config_entries.async_update_entry(entry, options=options)
+
     hass.data[DOMAIN][entry.entry_id] = {
         "entry_type": ENTRY_TYPE_MINER,
         "miner_type": miner_type,

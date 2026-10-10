@@ -239,6 +239,25 @@ class BitaxeAPIClient:
 
         raise ValueError(f"Unsupported miner type: {self.miner_type}")
 
+    async def set_temperature_target(
+        self,
+        target_c: int | float,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Set Bitaxe/NerdAxe automatic fan target temperature via PATCH /api/system."""
+        if self.miner_type not in (MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE):
+            raise ValueError(
+                f"Unsupported miner type for temperature target: {self.miner_type}"
+            )
+
+        payload = {"temptarget": int(round(float(target_c)))}
+        return await self._async_request(
+            "PATCH",
+            API_SYSTEM,
+            json_payload=payload,
+            timeout=timeout or DEFAULT_TIMEOUT,
+        )
+
     async def _avalon_system_info(self, timeout: float) -> Dict[str, Any]:
         """Fetch and normalize Avalon runtime data to axeos info schema."""
         summary_task = asyncio.create_task(self._avalon_command("summary", timeout=timeout))
