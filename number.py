@@ -56,9 +56,19 @@ def _api_bitaxe_temperature_target_c(info: dict[str, Any]) -> float | None:
 
 def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, Any]) -> float | None:
     """Return NerdAxe ASIC shutdown threshold from API payload when available."""
+    fans = info.get("fans")
+    if isinstance(fans, list) and fans:
+        first = fans[0]
+        if isinstance(first, dict):
+            fan_value = _api_first_numeric(first, ("overheatTemp", "overheat_temp"))
+            if fan_value is not None:
+                return fan_value
+
     return _api_first_numeric(
         info,
         (
+            "overheat_temp",
+            "overheatTemp",
             "shutdownTempAsic",
             "shutdownTempASIC",
             "shutdownTempAsics",
@@ -76,6 +86,14 @@ def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, Any]) -> float | None:
 
 def _api_nerdaxe_vr_shutdown_temp_c(info: dict[str, Any]) -> float | None:
     """Return NerdAxe VR shutdown threshold from API payload when available."""
+    fans = info.get("fans")
+    if isinstance(fans, list) and len(fans) > 1:
+        second = fans[1]
+        if isinstance(second, dict):
+            fan_value = _api_first_numeric(second, ("overheatTemp", "overheat_temp"))
+            if fan_value is not None:
+                return fan_value
+
     return _api_first_numeric(
         info,
         (
@@ -432,9 +450,24 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
                     info["temptarget"] = self._attr_native_value
                 elif _is_nerdaxe_miner(self._miner_type):
                     if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
-                        info["shutdownTempAsic"] = self._attr_native_value
+                        info["overheat_temp"] = self._attr_native_value
+                        fans = list(info.get("fans") or [])
+                        while len(fans) < 1:
+                            fans.append({})
+                        if isinstance(fans[0], dict):
+                            fan0 = dict(fans[0])
+                            fan0["overheatTemp"] = self._attr_native_value
+                            fans[0] = fan0
+                        info["fans"] = fans
                     else:
-                        info["vrShutdownTemp"] = self._attr_native_value
+                        fans = list(info.get("fans") or [])
+                        while len(fans) < 2:
+                            fans.append({})
+                        if isinstance(fans[1], dict):
+                            fan1 = dict(fans[1])
+                            fan1["overheatTemp"] = self._attr_native_value
+                            fans[1] = fan1
+                        info["fans"] = fans
                 current_data["info"] = info
                 self._coordinator.async_set_updated_data(current_data)
 

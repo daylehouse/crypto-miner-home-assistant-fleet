@@ -117,9 +117,19 @@ def _api_bitaxe_temperature_target_c(info: dict[str, object]) -> float | None:
 
 def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, object]) -> float | None:
     """Return NerdAxe ASIC shutdown threshold from API payload when available."""
+    fans = info.get("fans")
+    if isinstance(fans, list) and fans:
+        first = fans[0]
+        if isinstance(first, dict):
+            fan_value = _api_first_numeric(first, ("overheatTemp", "overheat_temp"))
+            if fan_value is not None:
+                return fan_value
+
     return _api_first_numeric(
         info,
         (
+            "overheat_temp",
+            "overheatTemp",
             "shutdownTempAsic",
             "shutdownTempASIC",
             "shutdownTempAsics",
@@ -137,6 +147,14 @@ def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, object]) -> float | None:
 
 def _api_nerdaxe_vr_shutdown_temp_c(info: dict[str, object]) -> float | None:
     """Return NerdAxe VR shutdown threshold from API payload when available."""
+    fans = info.get("fans")
+    if isinstance(fans, list) and len(fans) > 1:
+        second = fans[1]
+        if isinstance(second, dict):
+            fan_value = _api_first_numeric(second, ("overheatTemp", "overheat_temp"))
+            if fan_value is not None:
+                return fan_value
+
     return _api_first_numeric(
         info,
         (

@@ -40,6 +40,8 @@ def _first_numeric(info: Dict[str, Any], keys: tuple[str, ...]) -> float | None:
 
 
 NERDAXE_ASIC_SHUTDOWN_KEYS: tuple[str, ...] = (
+    "overheat_temp",
+    "overheatTemp",
     "shutdownTempAsic",
     "shutdownTempASIC",
     "shutdownTempAsics",
@@ -319,51 +321,60 @@ class BitaxeAPIClient:
         resolved_timeout = timeout or DEFAULT_TIMEOUT
         last_response: Dict[str, Any] = {}
 
-        async def _verify_value(keys: tuple[str, ...], expected: int) -> bool:
+        payload: Dict[str, Any] = {}
+        fans_payload: list[Dict[str, Any]] = []
+
+        if asic_shutdown_c is not None:
+            asic_value = int(round(float(asic_shutdown_c)))
+            payload["overheat_temp"] = asic_value
+            fans_payload.append({"overheatTemp": asic_value})
+
+        if vr_shutdown_c is not None:
+            vr_value = int(round(float(vr_shutdown_c)))
+            while len(fans_payload) < 2:
+                fans_payload.append({})
+            fans_payload[1] = {"overheatTemp": vr_value}
+
+        if fans_payload:
+            payload["fans"] = fans_payload
+
+        if not payload:
+            raise ValueError("At least one NerdAxe shutdown threshold must be provided")
+
+        last_response = await self._async_request(
+            "PATCH",
+            API_SYSTEM,
+            json_payload=payload,
+            timeout=resolved_timeout,
+        )
+
+        async def _verify_value(keys: tuple[str, ...], expected: int) -> bool | None:
             try:
                 info_payload = await self.get_system_info(timeout=resolved_timeout)
             except Exception:
                 # If read-back fails, do not block successful writes on verification.
-                return True
+                return None
 
             if not isinstance(info_payload, dict):
-                return True
+                return None
 
             observed = _first_numeric(info_payload, keys)
             if observed is None:
-                return False
+                return None
 
             return int(round(observed)) == expected
 
-        async def _apply_field(candidates: tuple[str, ...], value: int) -> Dict[str, Any]:
-            last_error: Exception | None = None
-
-            for key in candidates:
-                try:
-                    response = await self._async_request(
-                        "PATCH",
-                        API_SYSTEM,
-                        json_payload={key: value},
-                        timeout=resolved_timeout,
-                    )
-                except (TimeoutError, ConnectionError, ValueError) as err:
-                    last_error = err
-                    continue
-
-                if await _verify_value(candidates, value):
-                    return response
-
-            if last_error:
-                raise last_error
-            raise ValueError("NerdAxe API did not apply shutdown threshold update")
-
         if asic_shutdown_c is not None:
             asic_value = int(round(float(asic_shutdown_c)))
-            last_response = await _apply_field(NERDAXE_ASIC_SHUTDOWN_KEYS, asic_value)
+            verified = await _verify_value(NERDAXE_ASIC_SHUTDOWN_KEYS, asic_value)
+            if verified is False:
+                _LOGGER.debug("NerdAxe ASIC shutdown threshold write not confirmed via read-back")
 
         if vr_shutdown_c is not None:
             vr_value = int(round(float(vr_shutdown_c)))
-            last_response = await _apply_field(NERDAXE_VR_SHUTDOWN_KEYS, vr_value)
+            verified = await _verify_value(NERDAXE_VR_SHUTDOWN_KEYS, vr_value)
+            if verified is False:
+                _LOGGER.debug("NerdAxe VR shutdown threshold write not confirmed via read-back")
 
         return last_response
 
