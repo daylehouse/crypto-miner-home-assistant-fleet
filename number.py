@@ -34,44 +34,7 @@ from .const import (
     MINER_TYPE_NERDAXE,
     overheat_threshold_profile,
 )
-from .utils import normalize_identifier
-
-
-def _api_first_numeric(info: dict[str, Any], keys: tuple[str, ...]) -> float | None:
-    """Return first numeric value found in info for any candidate key."""
-    for key in keys:
-        raw = info.get(key)
-        if raw is None:
-            continue
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            continue
-    return None
-
-
-def _api_bitaxe_temperature_target_c(info: dict[str, Any]) -> float | None:
-    """Return Bitaxe target temperature from API payload when available."""
-    return _api_first_numeric(info, ("temptarget", "tempTarget", "temp_target"))
-
-
-def _api_nerdaxe_target_temp_c(info: dict[str, Any]) -> float | None:
-    """Return NerdAxe target temperature from API payload when available."""
-    value = _api_first_numeric(info, ("pidTargetTemp", "pid_target_temp", "targetTemp", "target_temp"))
-    if value is not None:
-        return value
-
-    fans = info.get("fans")
-    if isinstance(fans, list) and fans:
-        first = fans[0]
-        if isinstance(first, dict):
-            pid = first.get("pid")
-            if isinstance(pid, dict):
-                value = _api_first_numeric(pid, ("targetTemp", "target_temp"))
-                if value is not None:
-                    return value
-
-    return None
+from .utils import api_bitaxe_target_temp_c, api_nerdaxe_target_temp_c, normalize_identifier
 
 
 def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, Any]) -> float | None:

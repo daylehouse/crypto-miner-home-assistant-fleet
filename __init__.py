@@ -38,7 +38,7 @@ from .const import (
 )
 from .coordinator import BitaxeDataUpdateCoordinator
 from .services import async_register_services, async_unregister_services
-from .utils import normalize_identifier
+from .utils import api_bitaxe_target_temp_c, api_nerdaxe_target_temp_c, normalize_identifier
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -98,51 +98,18 @@ def _is_miner_entry(entry: ConfigEntry) -> bool:
     return _entry_type(entry) == ENTRY_TYPE_MINER
 
 
-def _api_first_numeric(info: dict[str, object], keys: tuple[str, ...]) -> float | None:
-    """Return first numeric value found in info for any candidate key."""
-    for key in keys:
-        raw = info.get(key)
-        if raw is None:
-            continue
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            continue
-    return None
-
-
-def _api_bitaxe_temperature_target_c(info: dict[str, object]) -> float | None:
-    """Return Bitaxe temp target from API payload when available."""
-    return _api_first_numeric(info, ("temptarget", "tempTarget", "temp_target"))
-
-
 def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, object]) -> float | None:
     """Return NerdAxe ASIC shutdown threshold from API payload when available."""
     fans = info.get("fans")
     if isinstance(fans, list) and fans:
         first = fans[0]
         if isinstance(first, dict):
-            fan_value = _api_first_numeric(first, ("overheatTemp", "overheat_temp"))
+            fan_value = api_nerdaxe_target_temp_c({"fans": [first]})
             if fan_value is not None:
                 return fan_value
 
-    return _api_first_numeric(
+    return api_nerdaxe_target_temp_c(
         info,
-        (
-            "overheat_temp",
-            "overheatTemp",
-            "shutdownTempAsic",
-            "shutdownTempASIC",
-            "shutdownTempAsics",
-            "shutdownTemp",
-            "shutdown_temp",
-            "asicShutdownTemp",
-            "asic_shutdown",
-            "asic_shutdown_temp",
-            "shutdown_temp_asic",
-            "overheatTempAsic",
-            "overheat_temp_asic",
-        ),
     )
 
 
@@ -152,27 +119,11 @@ def _api_nerdaxe_vr_shutdown_temp_c(info: dict[str, object]) -> float | None:
     if isinstance(fans, list) and len(fans) > 1:
         second = fans[1]
         if isinstance(second, dict):
-            fan_value = _api_first_numeric(second, ("overheatTemp", "overheat_temp"))
+            fan_value = api_nerdaxe_target_temp_c({"fans": [second]})
             if fan_value is not None:
                 return fan_value
 
-    return _api_first_numeric(
-        info,
-        (
-            "vrShutdownTemp",
-            "vrShutdownTemperature",
-            "shutdownTempVr",
-            "shutdownTempVR",
-            "vr_shutdown_temp",
-            "shutdown_temp_vr",
-            "voltageRegulatorShutdownTemp",
-            "voltageRegulatorShutdownTemperature",
-            "voltage_regulator_shutdown_temp",
-            "vregShutdownTemp",
-            "overheatTempVr",
-            "overheat_temp_vr",
-        ),
-    )
+    return api_nerdaxe_target_temp_c(info)
 
 
 async def _async_cleanup_duplicate_ip_entries(
@@ -398,14 +349,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             options_changed = False
 
             if miner_type == MINER_TYPE_BITAXE:
-                api_target = _api_bitaxe_temperature_target_c(info)
+                api_target = api_bitaxe_target_temp_c(info)
                 if api_target is not None:
                     target_temp = float(api_target)
                     options[CONF_TARGET_TEMP_C] = target_temp
                     options_changed = True
 
             if miner_type == MINER_TYPE_NERDAXE:
-                api_target = _api_nerdaxe_target_temp_c(info)
+                api_target = api_nerdaxe_target_temp_c(info)
                 if api_target is not None:
                     target_temp = float(api_target)
                     options[CONF_TARGET_TEMP_C] = target_temp
