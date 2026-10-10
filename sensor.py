@@ -278,6 +278,11 @@ def _default_overheat_threshold_c(miner_type: str) -> float:
     return float(threshold_default)
 
 
+def _warning_threshold_c(overheat_threshold_c: float) -> float:
+    """Return warning threshold one degree below configured overheat threshold."""
+    return float(overheat_threshold_c) - 1.0
+
+
 def _cleanup_fleet_entities_for_entry(hass: HomeAssistant, entry_id: str) -> None:
     """Remove stale fleet sensor entities bound to a specific config entry."""
     entity_registry = er.async_get(hass)
@@ -1619,8 +1624,8 @@ class BitaxeFleetSensorEntity(SensorEntity):
                 )
 
                 is_overheated = bool(
-                    (temp1_c is not None and temp1_c >= threshold_temp1)
-                    or (temp2_c is not None and temp2_c >= threshold_temp2)
+                    (temp1_c is not None and temp1_c >= _warning_threshold_c(threshold_temp1))
+                    or (temp2_c is not None and temp2_c >= _warning_threshold_c(threshold_temp2))
                 )
                 if not is_overheated:
                     continue
@@ -1654,7 +1659,7 @@ class BitaxeFleetSensorEntity(SensorEntity):
 
             if temp_c is None:
                 continue
-            if temp_c < threshold:
+            if temp_c < _warning_threshold_c(threshold):
                 continue
 
             hostname = str(info.get("hostname") or "").strip()
@@ -1908,7 +1913,7 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
 
             if temp_c is None:
                 return 0
-            return 1 if temp_c >= threshold else 0
+            return 1 if temp_c >= _warning_threshold_c(threshold) else 0
 
         if not self.coordinator.data or not self.entity_description.value_fn:
             # For numeric sensors, return 0 to avoid breaking float sums during reboots
