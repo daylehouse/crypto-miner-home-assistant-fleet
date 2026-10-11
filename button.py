@@ -5,7 +5,7 @@ from typing import Any
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -111,3 +111,4 @@ class BitaxeButtonEntity(CoordinatorEntity, ButtonEntity):
             except Exception as e:
                 _LOGGER.error(f"Failed to restart {self._host}: {e}")
                 raise
+

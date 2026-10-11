@@ -44,6 +44,8 @@ ENTRY_TYPE_FLEET = "fleet"
 API_SYSTEM_INFO = "/api/system/info"
 API_SYSTEM_ASIC = "/api/system/asic"
 API_SYSTEM_RESTART = "/api/system/restart"
+API_SYSTEM_PAUSE = "/api/system/pause"
+API_SYSTEM_RESUME = "/api/system/resume"
 API_SYSTEM = "/api/system"
 API_V2_SETTINGS = "/api/v2/settings"
 # Goldshell endpoints

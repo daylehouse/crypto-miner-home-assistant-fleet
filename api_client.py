@@ -16,6 +16,8 @@ from .const import (
     API_SYSTEM_ASIC,
     API_SYSTEM_INFO,
     API_SYSTEM_RESTART,
+    API_SYSTEM_PAUSE,
+    API_SYSTEM_RESUME,
     API_V2_SETTINGS,
     DEFAULT_TIMEOUT,
     MINER_TYPE_AVALON,
@@ -198,6 +200,42 @@ class BitaxeAPIClient:
             raise ValueError(f"Unsupported miner type: {self.miner_type}")
         except Exception as e:
             _LOGGER.error(f"Failed to restart system: {e}")
+            raise
+
+    async def pause_mining(self, timeout: Optional[float] = None) -> bool:
+        """Pause Bitaxe mining via POST /api/system/pause."""
+        if self.miner_type != MINER_TYPE_BITAXE:
+            raise ValueError(
+                f"Unsupported miner type for pause mining: {self.miner_type}"
+            )
+
+        try:
+            await self._async_request(
+                "POST",
+                API_SYSTEM_PAUSE,
+                timeout=timeout or DEFAULT_TIMEOUT,
+            )
+            return True
+        except Exception as e:
+            _LOGGER.error(f"Failed to pause mining: {e}")
+            raise
+
+    async def resume_mining(self, timeout: Optional[float] = None) -> bool:
+        """Resume Bitaxe mining via POST /api/system/resume."""
+        if self.miner_type != MINER_TYPE_BITAXE:
+            raise ValueError(
+                f"Unsupported miner type for resume mining: {self.miner_type}"
+            )
+
+        try:
+            await self._async_request(
+                "POST",
+                API_SYSTEM_RESUME,
+                timeout=timeout or DEFAULT_TIMEOUT,
+            )
+            return True
+        except Exception as e:
+            _LOGGER.error(f"Failed to resume mining: {e}")
             raise
 
     async def set_workmode(
