@@ -23,6 +23,7 @@ from .const import (
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
     CONF_POOLS,
+    CONF_TARGET_TEMP_C,
     CONF_VR_OVERHEAT_THRESHOLD_C,
     CONF_AVALON_USERNAME,
     CONF_AVALON_PASSWORD,
@@ -398,11 +399,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if miner_type == MINER_TYPE_BITAXE:
                 api_target = _api_bitaxe_temperature_target_c(info)
                 if api_target is not None:
-                    asic_threshold = float(api_target)
-                    vr_threshold = float(api_target)
-                    options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = asic_threshold
-                    options[CONF_VR_OVERHEAT_THRESHOLD_C] = vr_threshold
-                    options[CONF_OVERHEAT_THRESHOLD_C] = asic_threshold
+                    options[CONF_TARGET_TEMP_C] = float(api_target)
                     options_changed = True
 
             if miner_type == MINER_TYPE_NERDAXE:
@@ -432,6 +429,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_name": entry.data.get(CONF_DEVICE_NAME, device_name),
         "device_slug": entry.data.get(CONF_DEVICE_SLUG, device_slug),
         "pools": entry.data.get(CONF_POOLS, []),
+        CONF_TARGET_TEMP_C: float(
+            entry.options.get(
+                CONF_TARGET_TEMP_C,
+                _api_bitaxe_temperature_target_c(coordinator.data.get("info", {}))
+                if miner_type == MINER_TYPE_BITAXE and coordinator.data and isinstance(coordinator.data.get("info", {}), dict)
+                else threshold_default,
+            )
+        ),
         CONF_OVERHEAT_THRESHOLD_C: asic_threshold,
         CONF_ASIC_OVERHEAT_THRESHOLD_C: asic_threshold,
         CONF_VR_OVERHEAT_THRESHOLD_C: vr_threshold,
