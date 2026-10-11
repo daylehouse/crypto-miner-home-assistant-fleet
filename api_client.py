@@ -290,18 +290,52 @@ class BitaxeAPIClient:
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Set Bitaxe/NerdAxe automatic fan target temperature via PATCH /api/system."""
-        if self.miner_type != MINER_TYPE_BITAXE:
+        if self.miner_type not in (MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE):
             raise ValueError(
                 f"Unsupported miner type for temperature target: {self.miner_type}"
             )
 
-        payload = {"temptarget": int(round(float(target_c)))}
-        return await self._async_request(
+        target_value = int(round(float(target_c)))
+        resolved_timeout = timeout or DEFAULT_TIMEOUT
+
+        if self.miner_type == MINER_TYPE_BITAXE:
+            return await self._async_request(
+                "PATCH",
+                API_SYSTEM,
+                json_payload={"temptarget": target_value},
+                timeout=resolved_timeout,
+            )
+
+        response = await self._async_request(
             "PATCH",
             API_SYSTEM,
-            json_payload=payload,
-            timeout=timeout or DEFAULT_TIMEOUT,
+            json_payload={"target_temp": target_value},
+            timeout=resolved_timeout,
         )
+
+        if self.miner_type == MINER_TYPE_NERDAXE:
+            try:
+                info_payload = await self.get_system_info(timeout=resolved_timeout)
+            except Exception:
+                info_payload = None
+
+            if isinstance(info_payload, dict):
+                observed = _first_numeric(
+                    info_payload,
+                    ("target_temp", "targetTemp", "targettemp", "temp_target", "tempTarget", "temptarget"),
+                )
+                if observed is not None and int(round(observed)) != target_value:
+                    _LOGGER.debug(
+                        "NerdAxe target_temp write not confirmed; retrying with temptarget"
+                    )
+                    response = await self._async_request(
+                        "PATCH",
+                        API_SYSTEM,
+                        json_payload={"temptarget": target_value},
+                        timeout=resolved_timeout,
+                    )
+
+        return response
 
     async def set_nerdaxe_shutdown_temperatures(
         self,

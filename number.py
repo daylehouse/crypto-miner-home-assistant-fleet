@@ -55,6 +55,21 @@ def _api_bitaxe_temperature_target_c(info: dict[str, Any]) -> float | None:
     return _api_first_numeric(info, ("temptarget", "tempTarget", "temp_target"))
 
 
+def _api_nerdaxe_temperature_target_c(info: dict[str, Any]) -> float | None:
+    """Return NerdAxe target temperature from API payload when available."""
+    return _api_first_numeric(
+        info,
+        (
+            "target_temp",
+            "targetTemp",
+            "targettemp",
+            "temp_target",
+            "tempTarget",
+            "temptarget",
+        ),
+    )
+
+
 def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, Any]) -> float | None:
     """Return NerdAxe ASIC shutdown threshold from API payload when available."""
     fans = info.get("fans")
@@ -161,6 +176,7 @@ async def async_setup_entry(
         api_client = None
 
     bitaxe_target: float | None = None
+    nerdaxe_target: float | None = None
     nerdaxe_asic_target: float | None = None
     nerdaxe_vr_target: float | None = None
     if (_is_bitaxe_miner(miner_type) or _is_nerdaxe_miner(miner_type)) and coordinator and isinstance(coordinator.data, dict):
@@ -169,6 +185,7 @@ async def async_setup_entry(
             if _is_bitaxe_miner(miner_type):
                 bitaxe_target = _api_bitaxe_temperature_target_c(info)
             if _is_nerdaxe_miner(miner_type):
+                nerdaxe_target = _api_nerdaxe_temperature_target_c(info)
                 nerdaxe_asic_target = _api_nerdaxe_asic_shutdown_temp_c(info)
                 nerdaxe_vr_target = _api_nerdaxe_vr_shutdown_temp_c(info)
 
@@ -241,7 +258,13 @@ async def async_setup_entry(
         current_target_value = float(
             config_entry.options.get(
                 CONF_TARGET_TEMP_C,
-                bitaxe_target if bitaxe_target is not None else default_value,
+                (
+                    bitaxe_target
+                    if bitaxe_target is not None
+                    else (
+                        nerdaxe_target if nerdaxe_target is not None else default_value
+                    )
+                ),
             )
         )
         current_asic_value = float(
@@ -265,7 +288,7 @@ async def async_setup_entry(
         if nerdaxe_vr_target is not None:
             current_vr_value = float(nerdaxe_vr_target)
 
-        if _is_bitaxe_miner(miner_type):
+        if _is_bitaxe_miner(miner_type) or _is_nerdaxe_miner(miner_type):
             entities.append(
                 BitaxeTargetTemperatureNumber(
                     hass,
@@ -597,7 +620,12 @@ class BitaxeTargetTemperatureNumber(NumberEntity):
         if not isinstance(info, dict):
             return None
 
-        value = _api_bitaxe_temperature_target_c(info)
+        if _is_bitaxe_miner(self._miner_type):
+            value = _api_bitaxe_temperature_target_c(info)
+        elif _is_nerdaxe_miner(self._miner_type):
+            value = _api_nerdaxe_temperature_target_c(info)
+        else:
+            value = None
         if value is None:
             return None
         return float(max(self._attr_native_min_value, min(self._attr_native_max_value, value)))
@@ -621,7 +649,7 @@ class BitaxeTargetTemperatureNumber(NumberEntity):
         self.async_write_ha_state()
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set Bitaxe target temperature and persist it in entry options."""
+        """Set miner target temperature and persist it in entry options."""
         clamped = max(self._attr_native_min_value, min(self._attr_native_max_value, value))
         self._attr_native_value = float(clamped)
 
@@ -647,7 +675,10 @@ class BitaxeTargetTemperatureNumber(NumberEntity):
         if self._coordinator and isinstance(self._coordinator.data, dict):
             current_data = dict(self._coordinator.data)
             info = dict(current_data.get("info") or {})
-            info["temptarget"] = self._attr_native_value
+            if _is_nerdaxe_miner(self._miner_type):
+                info["target_temp"] = self._attr_native_value
+            else:
+                info["temptarget"] = self._attr_native_value
             current_data["info"] = info
             self._coordinator.async_set_updated_data(current_data)
 
