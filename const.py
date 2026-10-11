@@ -45,6 +45,7 @@ API_SYSTEM_INFO = "/api/system/info"
 API_SYSTEM_ASIC = "/api/system/asic"
 API_SYSTEM_RESTART = "/api/system/restart"
 API_SYSTEM = "/api/system"
+API_V2_SETTINGS = "/api/v2/settings"
 # Goldshell endpoints
 API_GOLDSHELL_DEVS = "/mcb/cgminer?cgminercmd=devs"
 API_GOLDSHELL_POOLS = "/mcb/pools"

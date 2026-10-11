@@ -57,6 +57,19 @@ def _api_bitaxe_temperature_target_c(info: dict[str, Any]) -> float | None:
 
 def _api_nerdaxe_temperature_target_c(info: dict[str, Any]) -> float | None:
     """Return NerdAxe target temperature from API payload when available."""
+    fans = info.get("fans")
+    if isinstance(fans, list) and fans:
+        first = fans[0]
+        if isinstance(first, dict):
+            pid = first.get("pid")
+            if isinstance(pid, dict):
+                pid_value = _api_first_numeric(pid, ("targetTemp", "target_temp", "temptarget"))
+                if pid_value is not None:
+                    return pid_value
+            fan_value = _api_first_numeric(first, ("targetTemp", "target_temp", "temptarget"))
+            if fan_value is not None:
+                return fan_value
+
     return _api_first_numeric(
         info,
         (
