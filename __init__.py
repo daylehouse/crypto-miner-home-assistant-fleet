@@ -22,7 +22,6 @@ from .const import (
     CONF_HOST,
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
-    CONF_TARGET_TEMP_C,
     CONF_POOLS,
     CONF_VR_OVERHEAT_THRESHOLD_C,
     CONF_AVALON_USERNAME,
@@ -38,7 +37,7 @@ from .const import (
 )
 from .coordinator import BitaxeDataUpdateCoordinator
 from .services import async_register_services, async_unregister_services
-from .utils import api_bitaxe_target_temp_c, api_nerdaxe_target_temp_c, normalize_identifier
+from .utils import normalize_identifier
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -98,18 +97,51 @@ def _is_miner_entry(entry: ConfigEntry) -> bool:
     return _entry_type(entry) == ENTRY_TYPE_MINER
 
 
+def _api_first_numeric(info: dict[str, object], keys: tuple[str, ...]) -> float | None:
+    """Return first numeric value found in info for any candidate key."""
+    for key in keys:
+        raw = info.get(key)
+        if raw is None:
+            continue
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _api_bitaxe_temperature_target_c(info: dict[str, object]) -> float | None:
+    """Return Bitaxe temp target from API payload when available."""
+    return _api_first_numeric(info, ("temptarget", "tempTarget", "temp_target"))
+
+
 def _api_nerdaxe_asic_shutdown_temp_c(info: dict[str, object]) -> float | None:
     """Return NerdAxe ASIC shutdown threshold from API payload when available."""
     fans = info.get("fans")
     if isinstance(fans, list) and fans:
         first = fans[0]
         if isinstance(first, dict):
-            fan_value = api_nerdaxe_target_temp_c({"fans": [first]})
+            fan_value = _api_first_numeric(first, ("overheatTemp", "overheat_temp"))
             if fan_value is not None:
                 return fan_value
 
-    return api_nerdaxe_target_temp_c(
+    return _api_first_numeric(
         info,
+        (
+            "overheat_temp",
+            "overheatTemp",
+            "shutdownTempAsic",
+            "shutdownTempASIC",
+            "shutdownTempAsics",
+            "shutdownTemp",
+            "shutdown_temp",
+            "asicShutdownTemp",
+            "asic_shutdown",
+            "asic_shutdown_temp",
+            "shutdown_temp_asic",
+            "overheatTempAsic",
+            "overheat_temp_asic",
+        ),
     )
 
 
@@ -119,11 +151,27 @@ def _api_nerdaxe_vr_shutdown_temp_c(info: dict[str, object]) -> float | None:
     if isinstance(fans, list) and len(fans) > 1:
         second = fans[1]
         if isinstance(second, dict):
-            fan_value = api_nerdaxe_target_temp_c({"fans": [second]})
+            fan_value = _api_first_numeric(second, ("overheatTemp", "overheat_temp"))
             if fan_value is not None:
                 return fan_value
 
-    return api_nerdaxe_target_temp_c(info)
+    return _api_first_numeric(
+        info,
+        (
+            "vrShutdownTemp",
+            "vrShutdownTemperature",
+            "shutdownTempVr",
+            "shutdownTempVR",
+            "vr_shutdown_temp",
+            "shutdown_temp_vr",
+            "voltageRegulatorShutdownTemp",
+            "voltageRegulatorShutdownTemperature",
+            "voltage_regulator_shutdown_temp",
+            "vregShutdownTemp",
+            "overheatTempVr",
+            "overheat_temp_vr",
+        ),
+    )
 
 
 async def _async_cleanup_duplicate_ip_entries(
@@ -322,7 +370,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             threshold_default,
         )
     )
-    target_temp = float(entry.options.get(CONF_TARGET_TEMP_C, threshold_default))
     goldshell_temp1_threshold = float(
         entry.options.get(
             CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C,
@@ -349,17 +396,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             options_changed = False
 
             if miner_type == MINER_TYPE_BITAXE:
-                api_target = api_bitaxe_target_temp_c(info)
+                api_target = _api_bitaxe_temperature_target_c(info)
                 if api_target is not None:
-                    target_temp = float(api_target)
-                    options[CONF_TARGET_TEMP_C] = target_temp
+                    asic_threshold = float(api_target)
+                    vr_threshold = float(api_target)
+                    options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = asic_threshold
+                    options[CONF_VR_OVERHEAT_THRESHOLD_C] = vr_threshold
+                    options[CONF_OVERHEAT_THRESHOLD_C] = asic_threshold
                     options_changed = True
 
             if miner_type == MINER_TYPE_NERDAXE:
-                api_target = api_nerdaxe_target_temp_c(info)
-                if api_target is not None:
-                    target_temp = float(api_target)
-                    options[CONF_TARGET_TEMP_C] = target_temp
+                asic_api_target = _api_nerdaxe_asic_shutdown_temp_c(info)
+                vr_api_target = _api_nerdaxe_vr_shutdown_temp_c(info)
+
+                if asic_api_target is not None:
+                    asic_threshold = float(asic_api_target)
+                    options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = asic_threshold
+                    options[CONF_OVERHEAT_THRESHOLD_C] = asic_threshold
+                    options_changed = True
+
+                if vr_api_target is not None:
+                    vr_threshold = float(vr_api_target)
+                    options[CONF_VR_OVERHEAT_THRESHOLD_C] = vr_threshold
                     options_changed = True
 
             if options_changed and options != entry.options:
@@ -374,7 +432,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_name": entry.data.get(CONF_DEVICE_NAME, device_name),
         "device_slug": entry.data.get(CONF_DEVICE_SLUG, device_slug),
         "pools": entry.data.get(CONF_POOLS, []),
-        CONF_TARGET_TEMP_C: target_temp,
         CONF_OVERHEAT_THRESHOLD_C: asic_threshold,
         CONF_ASIC_OVERHEAT_THRESHOLD_C: asic_threshold,
         CONF_VR_OVERHEAT_THRESHOLD_C: vr_threshold,
