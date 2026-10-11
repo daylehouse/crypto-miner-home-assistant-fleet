@@ -19,7 +19,7 @@ from .const import (
     MINER_TYPE_GOLDSHELL,
 )
 from .coordinator import BitaxeDataUpdateCoordinator
-from .utils import normalize_identifier
+from .utils import bitaxe_mining_active, normalize_identifier
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -142,19 +142,41 @@ class BitaxeMiningActiveSwitchEntity(CoordinatorEntity, SwitchEntity):
             "manufacturer": "Bitaxe Project",
             "model": "Bitaxe",
         }
+        self._pending_state: bool | None = None
 
     @property
     def is_on(self) -> bool:
         """Return True when Bitaxe mining is active."""
         info = self.coordinator.data.get("info", {}) if self.coordinator.data else {}
-        return bool(info.get("hashRate", 0) > 0)
+        if self._pending_state is not None:
+            return self._pending_state
+        return bitaxe_mining_active(info)
+
+    def _handle_coordinator_update(self) -> None:
+        """Refresh state and clear optimistic override once the API catches up."""
+        if self._pending_state is not None:
+            info = self.coordinator.data.get("info", {}) if self.coordinator.data else {}
+            actual_state = bitaxe_mining_active(info)
+            if actual_state == self._pending_state:
+                self._pending_state = None
+        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Unpause mining by resuming mining."""
-        await self._api_client.resume_mining()
-        await self.coordinator.async_request_refresh()
+        self._pending_state = True
+        try:
+            await self._api_client.resume_mining()
+            await self.coordinator.async_request_refresh()
+        except Exception:
+            self._pending_state = None
+            raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Pause mining by shutting the system down."""
-        await self._api_client.pause_mining()
-        await self.coordinator.async_request_refresh()
+        self._pending_state = False
+        try:
+            await self._api_client.pause_mining()
+            await self.coordinator.async_request_refresh()
+        except Exception:
+            self._pending_state = None
+            raise

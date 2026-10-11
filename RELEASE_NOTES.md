@@ -8,6 +8,7 @@
 - Switched NerdAxe target temperature writes to the V2 settings API endpoint.
 - Kept NerdAxe shutdown/overheat threshold controls separate from target temperature.
 - Added a Bitaxe Mining Active switch that pauses and resumes mining from the miner API.
+- Stabilized Bitaxe Mining Active state so it no longer bounces while hash-rate ramps.
 - Fixed a runtime regression in number entity method wiring for Bitaxe target temperature.
 - Fixed Bitaxe reboot hydration so target temperature no longer relinks local overheat sliders on startup.
 - Improved threshold and warning behavior consistency (warning threshold uses setpoint minus 1 C).
@@ -35,6 +36,7 @@
 - v1.3.0
 - v1.3.1
 - v1.3.2
+- v1.3.3
 
 ### Key Commits
 - e6010c6 - Fix hostname/IP duplicate miner entries on startup

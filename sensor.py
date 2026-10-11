@@ -49,7 +49,7 @@ from .const import (
     overheat_threshold_profile,
 )
 from .coordinator import BitaxeDataUpdateCoordinator
-from .utils import normalize_identifier
+from .utils import bitaxe_mining_active, normalize_identifier
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -411,7 +411,7 @@ BITAXE_SENSORS: list[BitaxeSensorEntityDescription] = [
         key="mining_active",
         name="Mining Active",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda data: 1 if data.get("info", {}).get("hashRate", 0) > 0 else 0,
+        value_fn=lambda data: 1 if bitaxe_mining_active(data.get("info", {})) else 0,
     ),
     BitaxeSensorEntityDescription(
         key="hashrate",
