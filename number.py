@@ -425,6 +425,118 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
                 self._attr_native_value = float(api_value)
         self.async_write_ha_state()
 
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the overheat threshold and persist it in entry options."""
+        clamped = max(self._attr_native_min_value, min(self._attr_native_max_value, value))
+        self._attr_native_value = float(clamped)
+
+        if self._is_api_backed_target:
+            api_client = self._api_client
+            if not isinstance(api_client, BitaxeAPIClient):
+                runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+                if isinstance(runtime_entry, dict):
+                    candidate = runtime_entry.get("api_client")
+                    if isinstance(candidate, BitaxeAPIClient):
+                        api_client = candidate
+
+            if not isinstance(api_client, BitaxeAPIClient):
+                raise HomeAssistantError("Miner API client is unavailable")
+
+            try:
+                if _is_bitaxe_miner(self._miner_type):
+                    await api_client.set_temperature_target(
+                        self._attr_native_value,
+                        timeout=CONNECTION_TIMEOUT,
+                    )
+                elif _is_nerdaxe_miner(self._miner_type):
+                    if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                        await api_client.set_nerdaxe_shutdown_temperatures(
+                            asic_shutdown_c=self._attr_native_value,
+                            timeout=CONNECTION_TIMEOUT,
+                        )
+                    else:
+                        await api_client.set_nerdaxe_shutdown_temperatures(
+                            vr_shutdown_c=self._attr_native_value,
+                            timeout=CONNECTION_TIMEOUT,
+                        )
+                else:
+                    raise HomeAssistantError("Unsupported miner type for API-backed threshold")
+            except (TimeoutError, ConnectionError, ValueError) as err:
+                raise HomeAssistantError(
+                    f"Failed to update miner temperature target: {err}"
+                ) from err
+
+            if self._coordinator and isinstance(self._coordinator.data, dict):
+                current_data = dict(self._coordinator.data)
+                info = dict(current_data.get("info") or {})
+                if _is_bitaxe_miner(self._miner_type):
+                    info["temptarget"] = self._attr_native_value
+                elif _is_nerdaxe_miner(self._miner_type):
+                    if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                        info["overheat_temp"] = self._attr_native_value
+                        fans = list(info.get("fans") or [])
+                        while len(fans) < 1:
+                            fans.append({})
+                        if isinstance(fans[0], dict):
+                            fan0 = dict(fans[0])
+                            fan0["overheatTemp"] = self._attr_native_value
+                            fans[0] = fan0
+                        info["fans"] = fans
+                    else:
+                        fans = list(info.get("fans") or [])
+                        while len(fans) < 2:
+                            fans.append({})
+                        if isinstance(fans[1], dict):
+                            fan1 = dict(fans[1])
+                            fan1["overheatTemp"] = self._attr_native_value
+                            fans[1] = fan1
+                        info["fans"] = fans
+                current_data["info"] = info
+                self._coordinator.async_set_updated_data(current_data)
+
+        current_options = dict(self._config_entry.options)
+        if self._is_api_backed_target:
+            if _is_bitaxe_miner(self._miner_type):
+                current_options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                current_options[CONF_VR_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+            else:
+                current_options[self._threshold_key] = self._attr_native_value
+                if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                    current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+        else:
+            current_options[self._threshold_key] = self._attr_native_value
+            if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                # Keep legacy option key synchronized for backward compatibility.
+                current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+            if self._threshold_key == CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C:
+                current_options[CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+            if self._threshold_key == CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C:
+                current_options[CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+        self.hass.config_entries.async_update_entry(self._config_entry, options=current_options)
+
+        runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if isinstance(runtime_entry, dict):
+            if self._is_api_backed_target:
+                if _is_bitaxe_miner(self._miner_type):
+                    runtime_entry[CONF_ASIC_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                    runtime_entry[CONF_VR_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                    runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                else:
+                    runtime_entry[self._threshold_key] = self._attr_native_value
+                    if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                        runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+            else:
+                runtime_entry[self._threshold_key] = self._attr_native_value
+                if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
+                    runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                if self._threshold_key == CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C:
+                    runtime_entry[CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+                if self._threshold_key == CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C:
+                    runtime_entry[CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C] = self._attr_native_value
+
+        self.async_write_ha_state()
+
 
 class BitaxeTargetTemperatureNumber(NumberEntity):
     """Bitaxe target temperature slider (Celsius)."""
@@ -549,114 +661,3 @@ class BitaxeTargetTemperatureNumber(NumberEntity):
 
         self.async_write_ha_state()
 
-    async def async_set_native_value(self, value: float) -> None:
-        """Set the overheat threshold and persist it in entry options."""
-        clamped = max(self._attr_native_min_value, min(self._attr_native_max_value, value))
-        self._attr_native_value = float(clamped)
-
-        if self._is_api_backed_target:
-            api_client = self._api_client
-            if not isinstance(api_client, BitaxeAPIClient):
-                runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-                if isinstance(runtime_entry, dict):
-                    candidate = runtime_entry.get("api_client")
-                    if isinstance(candidate, BitaxeAPIClient):
-                        api_client = candidate
-
-            if not isinstance(api_client, BitaxeAPIClient):
-                raise HomeAssistantError("Miner API client is unavailable")
-
-            try:
-                if _is_bitaxe_miner(self._miner_type):
-                    await api_client.set_temperature_target(
-                        self._attr_native_value,
-                        timeout=CONNECTION_TIMEOUT,
-                    )
-                elif _is_nerdaxe_miner(self._miner_type):
-                    if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
-                        await api_client.set_nerdaxe_shutdown_temperatures(
-                            asic_shutdown_c=self._attr_native_value,
-                            timeout=CONNECTION_TIMEOUT,
-                        )
-                    else:
-                        await api_client.set_nerdaxe_shutdown_temperatures(
-                            vr_shutdown_c=self._attr_native_value,
-                            timeout=CONNECTION_TIMEOUT,
-                        )
-                else:
-                    raise HomeAssistantError("Unsupported miner type for API-backed threshold")
-            except (TimeoutError, ConnectionError, ValueError) as err:
-                raise HomeAssistantError(
-                    f"Failed to update miner temperature target: {err}"
-                ) from err
-
-            if self._coordinator and isinstance(self._coordinator.data, dict):
-                current_data = dict(self._coordinator.data)
-                info = dict(current_data.get("info") or {})
-                if _is_bitaxe_miner(self._miner_type):
-                    info["temptarget"] = self._attr_native_value
-                elif _is_nerdaxe_miner(self._miner_type):
-                    if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
-                        info["overheat_temp"] = self._attr_native_value
-                        fans = list(info.get("fans") or [])
-                        while len(fans) < 1:
-                            fans.append({})
-                        if isinstance(fans[0], dict):
-                            fan0 = dict(fans[0])
-                            fan0["overheatTemp"] = self._attr_native_value
-                            fans[0] = fan0
-                        info["fans"] = fans
-                    else:
-                        fans = list(info.get("fans") or [])
-                        while len(fans) < 2:
-                            fans.append({})
-                        if isinstance(fans[1], dict):
-                            fan1 = dict(fans[1])
-                            fan1["overheatTemp"] = self._attr_native_value
-                            fans[1] = fan1
-                        info["fans"] = fans
-                current_data["info"] = info
-                self._coordinator.async_set_updated_data(current_data)
-
-        current_options = dict(self._config_entry.options)
-        if self._is_api_backed_target:
-            if _is_bitaxe_miner(self._miner_type):
-                current_options[CONF_ASIC_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-                current_options[CONF_VR_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-                current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-            else:
-                current_options[self._threshold_key] = self._attr_native_value
-                if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
-                    current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-        else:
-            current_options[self._threshold_key] = self._attr_native_value
-            if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
-                # Keep legacy option key synchronized for backward compatibility.
-                current_options[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-            if self._threshold_key == CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C:
-                current_options[CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-            if self._threshold_key == CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C:
-                current_options[CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-        self.hass.config_entries.async_update_entry(self._config_entry, options=current_options)
-
-        runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
-        if isinstance(runtime_entry, dict):
-            if self._is_api_backed_target:
-                if _is_bitaxe_miner(self._miner_type):
-                    runtime_entry[CONF_ASIC_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-                    runtime_entry[CONF_VR_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-                    runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-                else:
-                    runtime_entry[self._threshold_key] = self._attr_native_value
-                    if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
-                        runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-            else:
-                runtime_entry[self._threshold_key] = self._attr_native_value
-                if self._threshold_key == CONF_ASIC_OVERHEAT_THRESHOLD_C:
-                    runtime_entry[CONF_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-                if self._threshold_key == CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C:
-                    runtime_entry[CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-                if self._threshold_key == CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C:
-                    runtime_entry[CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C] = self._attr_native_value
-
-        self.async_write_ha_state()
