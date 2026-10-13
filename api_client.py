@@ -17,6 +17,7 @@ from .const import (
     API_SYSTEM_INFO,
     API_SYSTEM_RESTART,
     API_SYSTEM_PAUSE,
+    API_SYSTEM_POOLS,
     API_SYSTEM_RESUME,
     API_V2_SETTINGS,
     DEFAULT_TIMEOUT,
@@ -266,7 +267,12 @@ class BitaxeAPIClient:
         avalon_username: Optional[str] = None,
         avalon_password: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Update pool settings via PATCH /api/system.
+        """Update pool settings on the miner.
+
+        Newer AxeOS firmware (multi-pool) ignores flat stratum* keys in
+        PATCH /api/system; pools are slots written via
+        PUT /api/system/pools/{index}. Older firmware (and NerdAxe forks
+        without the multi-pool refactor) still uses the legacy PATCH.
 
         Args:
             stratum_url: Stratum server URL
@@ -286,17 +292,58 @@ class BitaxeAPIClient:
             ValueError: If response is invalid
         """
         if self.miner_type in (MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE):
-            payload = {
+            legacy_payload = {
                 "stratumURL": stratum_url,
                 "stratumPort": stratum_port,
                 "stratumUser": stratum_user,
                 "stratumPassword": stratum_password,
             }
 
+            try:
+                info = await self.get_system_info(timeout=timeout or DEFAULT_TIMEOUT)
+            except Exception as e:
+                _LOGGER.debug(f"Could not fetch system info before pool update: {e}")
+                info = {}
+
+            pools = info.get("pools") if isinstance(info, dict) else None
+            if isinstance(pools, list):
+                # Multi-pool firmware: rewrite the primary pool slot. Merge the
+                # slot's existing fields so PUT defaults don't wipe settings
+                # like stratumTLS, protocol, or suggested difficulty.
+                try:
+                    primary_idx = int(info.get("primaryPoolIndex") or 0)
+                except (TypeError, ValueError):
+                    primary_idx = 0
+
+                existing: Dict[str, Any] = {}
+                for pool in pools:
+                    if isinstance(pool, dict) and pool.get("id") == primary_idx:
+                        existing = pool
+                        break
+
+                payload = dict(existing)
+                payload.pop("id", None)
+                payload.update(
+                    {
+                        "stratumURL": stratum_url,
+                        "stratumPort": int(stratum_port),
+                        "stratumUser": stratum_user,
+                        "stratumPassword": stratum_password,
+                    }
+                )
+
+                return await self._async_request(
+                    "PUT",
+                    f"{API_SYSTEM_POOLS}/{primary_idx}",
+                    json_payload=payload,
+                    timeout=timeout or DEFAULT_TIMEOUT,
+                )
+
+            # Legacy firmware: flat stratum* keys via PATCH /api/system
             return await self._async_request(
                 "PATCH",
                 API_SYSTEM,
-                json_payload=payload,
+                json_payload=legacy_payload,
                 timeout=timeout or DEFAULT_TIMEOUT,
             )
 
