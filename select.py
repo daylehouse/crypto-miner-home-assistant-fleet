@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -128,6 +128,36 @@ def _current_pool_from_info(info: dict[str, Any]) -> tuple[str | None, int | Non
             info.get("stratumUser") or info.get("stratum_user") or info.get("poolUser")
         ),
     )
+
+
+def _active_pool_from_info(info: dict[str, Any]) -> tuple[str | None, int | None, str | None]:
+    """Return active pool tuple, preferring multi-pool slot data from newer firmware."""
+    pools = info.get("pools")
+    if isinstance(pools, list) and pools:
+
+        def _pool_index(key: str, default: int) -> int:
+            try:
+                return int(info.get(key) or default)
+            except (TypeError, ValueError):
+                return default
+
+        using_fallback = bool(info.get("isUsingFallbackStratum"))
+        active_idx = (
+            _pool_index("secondaryPoolIndex", 1)
+            if using_fallback
+            else _pool_index("primaryPoolIndex", 0)
+        )
+
+        for pool in pools:
+            if not isinstance(pool, dict) or pool.get("id") != active_idx:
+                continue
+            return (
+                _normalize_pool_url(pool.get("stratumURL")),
+                _normalize_pool_port(pool.get("stratumPort")),
+                _normalize_pool_user(pool.get("stratumUser")),
+            )
+
+    return _current_pool_from_info(info)
 
 
 async def async_setup_entry(
@@ -308,6 +338,8 @@ class BitaxePoolSelectEntity(CoordinatorEntity, SelectEntity):
             option_names.append(option)
 
         self._attr_options = option_names
+        self._configured_options = list(option_names)
+        self._dynamic_option: str | None = None
         self._attr_name = "Active Pool"
         self._attr_unique_id = f"{miner_type}_{device_slug}_active_pool"
         self._attr_icon = "mdi:pool"
@@ -319,11 +351,16 @@ class BitaxePoolSelectEntity(CoordinatorEntity, SelectEntity):
             "model": miner_type.capitalize(),
         }
 
-    @property
-    def current_option(self) -> str | None:
-        """Return selected option by matching current stratum config."""
+    def _active_pool(self) -> tuple[str | None, int | None, str | None]:
+        """Return the pool tuple currently running on the miner."""
         info = self.coordinator.data.get("info", {}) if self.coordinator.data else {}
-        current_url, current_port, current_user = _current_pool_from_info(info)
+        return _active_pool_from_info(info)
+
+    def _match_configured_option(
+        self, current: tuple[str | None, int | None, str | None]
+    ) -> str | None:
+        """Return configured option matching the active pool, if any."""
+        current_url, current_port, current_user = current
 
         best_option: str | None = None
         best_score = -1
@@ -354,13 +391,45 @@ class BitaxePoolSelectEntity(CoordinatorEntity, SelectEntity):
                 best_score = score
                 best_option = option
 
-        if best_option is not None:
-            return best_option
+        return best_option
 
-        return None
+    def _sync_options(self) -> None:
+        """Keep dropdown options in sync with the pool running on the miner."""
+        current = self._active_pool()
+        if self._match_configured_option(current) is not None or current[0] is None:
+            self._dynamic_option = None
+        else:
+            label = f"Unmanaged pool ({current[0]}"
+            if current[1] is not None:
+                label += f":{current[1]}"
+            label += ")"
+            self._dynamic_option = label
+
+        options = list(self._configured_options)
+        if self._dynamic_option:
+            options.append(self._dynamic_option)
+        self._attr_options = options
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Resync options with miner state on each coordinator update."""
+        self._sync_options()
+        super()._handle_coordinator_update()
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the option matching the pool currently running on the miner."""
+        self._sync_options()
+        return self._match_configured_option(self._active_pool()) or self._dynamic_option
 
     async def async_select_option(self, option: str) -> None:
         """Set selected pool on miner via API, then reboot to apply."""
+        if self._dynamic_option and option == self._dynamic_option:
+            raise ValueError(
+                "The pool running on the miner is not a configured profile; "
+                "add it as a pool profile or change it from the miner web UI"
+            )
+
         if option not in self._pool_by_option:
             raise ValueError(f"Unknown pool option: {option}")
 
