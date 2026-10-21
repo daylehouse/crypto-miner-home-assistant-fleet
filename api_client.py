@@ -86,6 +86,7 @@ class BitaxeAPIClient:
         avalon_port: int = 4028,
         avalon_web_user: str = "admin",
         avalon_web_password: str = "admin",
+        miner_name: Optional[str] = None,
     ):
         """Initialize the API client.
 
@@ -106,6 +107,7 @@ class BitaxeAPIClient:
         self._avalon_port = avalon_port
         self._avalon_web_user = avalon_web_user
         self._avalon_web_password = avalon_web_password
+        self._miner_name = str(miner_name or "").strip()
         self._goldshell_mac_address = ""
 
     @staticmethod
@@ -605,7 +607,11 @@ class BitaxeAPIClient:
             misc,
             summary,
         )
-        hostname = self._avalon_find_hostname(misc, version, stats_sections, devs_sections) or self.host
+        hostname = (
+            self._miner_name
+            or self._avalon_find_hostname(misc, version, stats_sections, devs_sections)
+            or self.host
+        )
 
         hashrate_gh = 0.0
         try:

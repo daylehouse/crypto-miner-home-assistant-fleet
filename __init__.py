@@ -296,6 +296,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         miner_type=miner_type,
         avalon_web_user=avalon_username,
         avalon_web_password=avalon_password,
+        miner_name=entry.data.get(CONF_MINER_NAME),
     )
 
     # Create coordinator with 30-second update interval
