@@ -107,6 +107,7 @@ class BitaxeAPIClient:
         self._avalon_port = avalon_port
         self._avalon_web_user = avalon_web_user
         self._avalon_web_password = avalon_web_password
+        self._avalon_mac_address = ""
         self._miner_name = str(miner_name or "").strip()
         self._goldshell_mac_address = ""
 
@@ -600,6 +601,12 @@ class BitaxeAPIClient:
             summary,
             active_pool or {},
         )
+        if mac_address:
+            # Cache the discovered MAC so transient discovery gaps do not
+            # blank out the value between polls.
+            self._avalon_mac_address = mac_address
+        else:
+            mac_address = self._avalon_mac_address
         chip_type = self._avalon_find_chip_type(
             version,
             devs_sections,
@@ -783,7 +790,10 @@ class BitaxeAPIClient:
                         return normalized
                 return None
 
-            return normalize_mac(node)
+            # Scalars are only converted when their key is MAC-like (handled
+            # in the dict branch above). Arbitrary hex values such as share
+            # counts must never become fake MAC addresses.
+            return None
 
         for payload in payloads:
             normalized = visit(payload)
