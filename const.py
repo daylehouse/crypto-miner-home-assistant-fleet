@@ -18,6 +18,7 @@ CONF_HOST = "host"
 CONF_MINER_TYPE = "miner_type"
 CONF_DEVICE_NAME = "device_name"
 CONF_DEVICE_SLUG = "device_slug"
+CONF_MINER_NAME = "miner_name"
 CONF_POOLS = "pools"
 CONF_ENTRY_TYPE = "entry_type"
 # Legacy ASIC threshold key (kept for backward compatibility)

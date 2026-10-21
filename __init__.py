@@ -20,6 +20,7 @@ from .const import (
     CONF_GOLDSHELL_TEMP1_OVERHEAT_THRESHOLD_C,
     CONF_GOLDSHELL_TEMP2_OVERHEAT_THRESHOLD_C,
     CONF_HOST,
+    CONF_MINER_NAME,
     CONF_MINER_TYPE,
     CONF_OVERHEAT_THRESHOLD_C,
     CONF_POOLS,
@@ -333,9 +334,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if removed_current_entry:
         return True
 
-    preferred_host = _preferred_device_host(host, discovered_hostname)
-    device_name = f"{miner_type.capitalize()} {preferred_host}"
-    device_slug = normalize_identifier(preferred_host)
+    # Prefer a user-provided miner name (Avalon) for naming, then the
+    # discovered hostname, with fallback to host.
+    configured_miner_name = entry.data.get(CONF_MINER_NAME)
+    if isinstance(configured_miner_name, str) and configured_miner_name.strip():
+        device_name = f"{miner_type.capitalize()} {configured_miner_name.strip()}"
+        device_slug = normalize_identifier(configured_miner_name)
+    else:
+        preferred_host = _preferred_device_host(host, discovered_hostname)
+        device_name = f"{miner_type.capitalize()} {preferred_host}"
+        device_slug = normalize_identifier(preferred_host)
 
     if (
         entry.data.get(CONF_DEVICE_NAME) != device_name

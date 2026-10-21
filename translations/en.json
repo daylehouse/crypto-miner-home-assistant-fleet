@@ -44,6 +44,21 @@
           "pool3_password": "Pool 3 Password"
         }
       },
+      "avalon_name": {
+        "title": "Avalon Miner Name",
+        "description": "Enter a unique name for the Avalon miner at {host}. Avalon hostnames cannot be discovered reliably, so this name is used for the device name, entity IDs, and the pool username suffix (user.name).",
+        "data": {
+          "miner_name": "Miner Name"
+        }
+      },
+      "avalon_credentials": {
+        "title": "Avalon Miner Credentials",
+        "description": "Enter the admin credentials for {device_name}. These are required to update pool settings remotely.",
+        "data": {
+          "avalon_username": "Admin Username",
+          "avalon_password": "Admin Password"
+        }
+      },
       "reconfigure": {
         "title": "Reconfigure Miner",
         "description": "Update miner type and host for this existing entry.",
@@ -58,6 +73,8 @@
       "connection_timeout": "Connection timed out. The miner may be unreachable or taking too long to respond.",
       "invalid_host": "Invalid host address. Please enter a valid IP address or hostname.",
       "invalid_pool": "Each configured pool must include URL, port, user, and password.",
+      "invalid_credentials": "Username and password cannot be empty. Please provide both credentials.",
+      "invalid_name": "Miner name cannot be empty.",
       "unknown": "An unexpected error occurred. Please try again."
     },
     "abort": {

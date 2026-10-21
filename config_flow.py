@@ -15,6 +15,7 @@ from .api_client import BitaxeAPIClient
 from .const import (
     CONF_DEVICE_NAME,
     CONF_DEVICE_SLUG,
+    CONF_MINER_NAME,
     CONF_ENTRY_TYPE,
     CONF_HOST,
     CONF_MINER_TYPE,
@@ -75,10 +76,16 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return None
 
         try:
-            return format_mac(mac)
+            normalized = format_mac(mac)
         except ValueError:
             _LOGGER.debug("Device returned invalid macAddr: %s", mac)
             return None
+
+        # Reject placeholder MACs some miners report identically for every unit
+        if normalized == "00:00:00:00:00:00":
+            return None
+
+        return normalized
 
     @staticmethod
     def _is_ip_address(value: str) -> bool:
@@ -162,9 +169,25 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _miner_hostname(self) -> str:
         """Return the hostname suffix to use for pool users."""
         return str(
-            self._pending_info.get("hostname")
+            self._pending_data.get(CONF_MINER_NAME)
+            or self._pending_info.get("hostname")
             or self._pending_data.get(CONF_DEVICE_SLUG, "")
         ).strip()
+
+    def _unique_device_slug(self, base_slug: str) -> str:
+        """Return base_slug made unique among existing entries."""
+        existing = {
+            str(entry.data.get(CONF_DEVICE_SLUG, "")).strip()
+            for entry in self._async_current_entries()
+        }
+        slug = base_slug or "miner"
+        if slug not in existing:
+            return slug
+
+        suffix = 2
+        while f"{slug}-{suffix}" in existing:
+            suffix += 1
+        return f"{slug}-{suffix}"
 
     def _user_with_hostname_suffix(self, base_user: str) -> str:
         """Ensure a pool username ends with .hostname for the miner being added."""
@@ -390,6 +413,9 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Goldshell skips pool configuration and goes directly to credentials
                 if self.miner_type == MINER_TYPE_GOLDSHELL:
                     return await self.async_step_goldshell_credentials()
+                # Avalon needs a user-provided miner name before pool suffixes
+                if self.miner_type == MINER_TYPE_AVALON:
+                    return await self.async_step_avalon_name()
                 return await self.async_step_pools()
 
         return self.async_show_form(
@@ -453,6 +479,9 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Goldshell skips pool configuration and goes directly to credentials
                 if self.miner_type == MINER_TYPE_GOLDSHELL:
                     return await self.async_step_goldshell_credentials()
+                # Avalon needs a user-provided miner name before pool suffixes
+                if self.miner_type == MINER_TYPE_AVALON:
+                    return await self.async_step_avalon_name()
                 return await self.async_step_pools()
 
         return self.async_show_form(
@@ -460,6 +489,40 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required(CONF_HOST): str}),
             errors=errors,
             description_placeholders={"miner_type": self.miner_type.capitalize()},
+        )
+
+    async def async_step_avalon_name(
+        self, user_input: Optional[dict[str, Any]] = None
+    ) -> FlowResult:
+        """Ask for the Avalon miner name used for naming and pool user suffixes."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            miner_name = str(user_input.get(CONF_MINER_NAME, "")).strip()
+            if not miner_name:
+                errors["base"] = "invalid_name"
+            else:
+                self._pending_data[CONF_MINER_NAME] = miner_name
+                self._pending_data[CONF_DEVICE_NAME] = f"Avalon {miner_name}"
+                self._pending_data[CONF_DEVICE_SLUG] = self._unique_device_slug(
+                    normalize_identifier(miner_name)
+                )
+                return await self.async_step_pools()
+
+        discovered = str(self._pending_info.get("hostname") or "").strip()
+        default_name = (
+            discovered if discovered and not self._is_ip_address(discovered) else "avalon"
+        )
+
+        return self.async_show_form(
+            step_id="avalon_name",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_MINER_NAME, default=default_name): str}
+            ),
+            errors=errors,
+            description_placeholders={
+                "host": self._pending_data.get(CONF_HOST, ""),
+            },
         )
 
     async def async_step_pools(
