@@ -168,9 +168,13 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def _miner_hostname(self) -> str:
         """Return the hostname suffix to use for pool users."""
+        miner_name = str(self._pending_data.get(CONF_MINER_NAME) or "").strip()
+        if miner_name:
+            # Miner names are free text; use the hostname-safe form so pool
+            # usernames stay valid (user.name) and match the device slug.
+            return normalize_identifier(miner_name)
         return str(
-            self._pending_data.get(CONF_MINER_NAME)
-            or self._pending_info.get("hostname")
+            self._pending_info.get("hostname")
             or self._pending_data.get(CONF_DEVICE_SLUG, "")
         ).strip()
 
@@ -538,7 +542,7 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors={"base": "invalid_pool"},
                     description_placeholders={
                         "device_name": self._pending_data.get(CONF_DEVICE_NAME, "Miner"),
-                        "miner_hostname": str(self._pending_info.get("hostname") or self._pending_data.get(CONF_DEVICE_SLUG, "")).strip(),
+                        "miner_hostname": self._miner_hostname(),
                     },
                 )
 
@@ -560,7 +564,7 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=self._pool_schema(),
             description_placeholders={
                 "device_name": self._pending_data.get(CONF_DEVICE_NAME, "Miner"),
-                "miner_hostname": str(self._pending_info.get("hostname") or self._pending_data.get(CONF_DEVICE_SLUG, "")).strip(),
+                "miner_hostname": self._miner_hostname(),
             },
         )
 
@@ -672,15 +676,22 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_mismatch()
 
+            # Keep miner-name-based naming for entries that have one (Avalon)
+            miner_name = str(reconfigure_entry.data.get(CONF_MINER_NAME) or "").strip()
+            if miner_name:
+                device_name = f"{miner_type.capitalize()} {miner_name}"
+                device_slug = normalize_identifier(miner_name)
+            else:
+                device_name = self._discovered_device_name(info, host, miner_type)
+                device_slug = self._discovered_device_slug(info, host)
+
             return self.async_update_reload_and_abort(
                 reconfigure_entry,
                 data_updates={
                     CONF_HOST: host,
                     CONF_MINER_TYPE: miner_type,
-                    CONF_DEVICE_NAME: self._discovered_device_name(
-                        info, host, miner_type
-                    ),
-                    CONF_DEVICE_SLUG: self._discovered_device_slug(info, host),
+                    CONF_DEVICE_NAME: device_name,
+                    CONF_DEVICE_SLUG: device_slug,
                     CONF_POOLS: reconfigure_entry.data.get(CONF_POOLS, []),
                 },
             )
