@@ -324,8 +324,21 @@ def _cleanup_legacy_goldshell_overheat_entities_for_entry(
             entity_registry.async_remove(registry_entry.entity_id)
 
 
+def _cleanup_mining_active_sensor_for_entry(
+    hass: HomeAssistant,
+    entry_id: str,
+) -> None:
+    """Remove the retired per-miner Mining Active sensor for a config entry."""
+    entity_registry = er.async_get(hass)
+    for registry_entry in er.async_entries_for_config_entry(entity_registry, entry_id):
+        if registry_entry.domain != "sensor":
+            continue
+        unique_id = registry_entry.unique_id or ""
+        if unique_id.endswith("_mining_active"):
+            entity_registry.async_remove(registry_entry.entity_id)
+
+
 SENSOR_ICONS: dict[str, str] = {
-    "mining_active": "mdi:pickaxe",
     "overheated": "mdi:chip",
     "vr_overheated": "mdi:thermometer-lines",
     "aleo_overheated": "mdi:thermometer-alert",
@@ -407,12 +420,6 @@ class BitaxeSensorEntityDescription(SensorEntityDescription):
 
 BITAXE_SENSORS: list[BitaxeSensorEntityDescription] = [
     # Main mining metrics
-    BitaxeSensorEntityDescription(
-        key="mining_active",
-        name="Mining Active",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda data: 1 if bitaxe_mining_active(data.get("info", {})) else 0,
-    ),
     BitaxeSensorEntityDescription(
         key="hashrate",
         name="Hashrate",
@@ -908,12 +915,6 @@ def _goldshell_hw_error_rate_pct(coin_data: dict[str, Any]) -> float:
 
 
 GOLDSHELL_SENSORS: list[BitaxeSensorEntityDescription] = [
-    BitaxeSensorEntityDescription(
-        key="mining_active",
-        name="Mining Active",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda data: _goldshell_mining_active(data),
-    ),
     # ALEO Sensors (coin_index=0)
     BitaxeSensorEntityDescription(
         key="aleo_hashrate",
@@ -1344,6 +1345,7 @@ async def async_setup_entry(
         return
 
     _cleanup_fleet_entities_for_entry(hass, config_entry.entry_id)
+    _cleanup_mining_active_sensor_for_entry(hass, config_entry.entry_id)
 
     coordinator: BitaxeDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id][
         "coordinator"
@@ -1469,10 +1471,29 @@ class BitaxeFleetSensorEntity(SensorEntity):
         ]
 
     def _active_mining_entries(self) -> list[dict[str, Any]]:
-        """Return online miners that are currently mining (hashrate > 0)."""
+        """Return online miners whose actual mining state is active.
+
+        Uses the miner-reported mining state (Bitaxe pause, NerdAxe shutdown,
+        Goldshell idle mode) with a hashrate fallback, so paused or shut-down
+        miners count as inactive even while hashrate coasts to zero.
+        """
         active_entries: list[dict[str, Any]] = []
         for entry_data in self._online_entries():
-            if self._entry_hashrate_gh(entry_data) > 0:
+            coordinator = entry_data.get("coordinator")
+            if not isinstance(coordinator, BitaxeDataUpdateCoordinator):
+                continue
+
+            info = coordinator.data.get("info", {}) if coordinator.data else {}
+            if not isinstance(info, dict):
+                continue
+
+            miner_type = str(entry_data.get("miner_type") or "").strip().lower()
+            if miner_type == MINER_TYPE_GOLDSHELL:
+                if not info.get("idle_mode", False) and _goldshell_mining_active(
+                    coordinator.data or {}
+                ):
+                    active_entries.append(entry_data)
+            elif bitaxe_mining_active(info):
                 active_entries.append(entry_data)
         return active_entries
 
@@ -1773,10 +1794,10 @@ class BitaxeFleetSensorEntity(SensorEntity):
             return max(len(self._configured_miner_entries()) - len(active_mining_entries), 0)
 
         if self._key == "fleet_miners_online":
-            return len(online_entries)
+            return len(active_mining_entries)
 
         if self._key == "fleet_miners_offline":
-            return max(len(self._configured_miner_entries()) - len(online_entries), 0)
+            return max(len(self._configured_miner_entries()) - len(active_mining_entries), 0)
 
         if self._key == "fleet_miners_asic_overheated":
             return len(self._overheated_miner_hostnames("asic"))
@@ -1793,7 +1814,7 @@ class BitaxeFleetSensorEntity(SensorEntity):
             total = len(self._configured_miner_entries())
             if total == 0:
                 return 0
-            return round((len(online_entries) / total) * 100, 2)
+            return round((len(active_mining_entries) / total) * 100, 2)
 
         if self._key == "fleet_miners_unknown_pool":
             online_pool_capable = [

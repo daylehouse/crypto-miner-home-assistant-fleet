@@ -17,6 +17,7 @@ from .const import (
     DOMAIN,
     MINER_TYPE_BITAXE,
     MINER_TYPE_GOLDSHELL,
+    MINER_TYPE_NERDAXE,
 )
 from .coordinator import BitaxeDataUpdateCoordinator
 from .utils import bitaxe_mining_active, normalize_identifier
@@ -28,7 +29,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up switch entities for Bitaxe/NerdAxe."""
     entity_registry = er.async_get(hass)
-    if config_entry.data.get(CONF_MINER_TYPE) != MINER_TYPE_BITAXE:
+    if config_entry.data.get(CONF_MINER_TYPE) not in (
+        MINER_TYPE_BITAXE,
+        MINER_TYPE_NERDAXE,
+    ):
         for registry_entry in er.async_entries_for_config_entry(entity_registry, config_entry.entry_id):
             if registry_entry.domain != "switch":
                 continue
@@ -48,11 +52,12 @@ async def async_setup_entry(
     device_slug = config_entry.data.get(CONF_DEVICE_SLUG, normalize_identifier(coordinator.host))
 
     entities: list[SwitchEntity] = []
-    if miner_type == MINER_TYPE_BITAXE:
+    if miner_type in (MINER_TYPE_BITAXE, MINER_TYPE_NERDAXE):
         entities.append(
             BitaxeMiningActiveSwitchEntity(
                 coordinator,
                 api_client,
+                miner_type,
                 device_name,
                 device_slug,
             )
@@ -117,7 +122,7 @@ class GoldshellIdleModeSwitchEntity(CoordinatorEntity, SwitchEntity):
 
 
 class BitaxeMiningActiveSwitchEntity(CoordinatorEntity, SwitchEntity):
-    """Switch Bitaxe mining on/off."""
+    """Switch mining on/off (Bitaxe pause/resume, NerdAxe shutdown/restart)."""
 
     _attr_has_entity_name = True
 
@@ -125,22 +130,24 @@ class BitaxeMiningActiveSwitchEntity(CoordinatorEntity, SwitchEntity):
         self,
         coordinator: BitaxeDataUpdateCoordinator,
         api_client: Any,
+        miner_type: str,
         device_name: str,
         device_slug: str,
     ) -> None:
         super().__init__(coordinator)
         self._api_client = api_client
+        self._miner_type = miner_type
         self._device_name = device_name
         self._device_slug = device_slug
         self._attr_name = "Mining Active"
-        self._attr_unique_id = f"bitaxe_{device_slug}_mining_active"
+        self._attr_unique_id = f"{miner_type}_{device_slug}_mining_active"
         self._attr_icon = "mdi:pickaxe"
         self._attr_entity_category = EntityCategory.CONFIG
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"bitaxe_{device_slug}")},
+            "identifiers": {(DOMAIN, f"{miner_type}_{device_slug}")},
             "name": self._device_name,
             "manufacturer": "Bitaxe Project",
-            "model": "Bitaxe",
+            "model": miner_type.capitalize(),
         }
         self._pending_state: bool | None = None
 
@@ -162,7 +169,7 @@ class BitaxeMiningActiveSwitchEntity(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Unpause mining by resuming mining."""
+        """Resume mining (NerdAxe resumes by rebooting)."""
         self._pending_state = True
         try:
             await self._api_client.resume_mining()
@@ -172,7 +179,7 @@ class BitaxeMiningActiveSwitchEntity(CoordinatorEntity, SwitchEntity):
             raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Pause mining by shutting the system down."""
+        """Pause mining (NerdAxe pauses by shutting mining down)."""
         self._pending_state = False
         try:
             await self._api_client.pause_mining()

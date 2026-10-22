@@ -19,6 +19,7 @@ from .const import (
     API_SYSTEM_PAUSE,
     API_SYSTEM_POOLS,
     API_SYSTEM_RESUME,
+    API_SYSTEM_SHUTDOWN,
     API_V2_SETTINGS,
     DEFAULT_TIMEOUT,
     MINER_TYPE_AVALON,
@@ -207,8 +208,17 @@ class BitaxeAPIClient:
             raise
 
     async def pause_mining(self, timeout: Optional[float] = None) -> bool:
-        """Pause Bitaxe mining via POST /api/system/pause."""
-        if self.miner_type != MINER_TYPE_BITAXE:
+        """Pause mining on Bitaxe/NerdAxe.
+
+        Bitaxe pauses via POST /api/system/pause. NerdAxe has no pause
+        endpoint, so mining is stopped via POST /api/system/shutdown;
+        a restart resumes mining.
+        """
+        if self.miner_type == MINER_TYPE_BITAXE:
+            endpoint = API_SYSTEM_PAUSE
+        elif self.miner_type == MINER_TYPE_NERDAXE:
+            endpoint = API_SYSTEM_SHUTDOWN
+        else:
             raise ValueError(
                 f"Unsupported miner type for pause mining: {self.miner_type}"
             )
@@ -216,7 +226,7 @@ class BitaxeAPIClient:
         try:
             await self._async_request(
                 "POST",
-                API_SYSTEM_PAUSE,
+                endpoint,
                 timeout=timeout or DEFAULT_TIMEOUT,
             )
             return True
@@ -225,22 +235,29 @@ class BitaxeAPIClient:
             raise
 
     async def resume_mining(self, timeout: Optional[float] = None) -> bool:
-        """Resume Bitaxe mining via POST /api/system/resume."""
-        if self.miner_type != MINER_TYPE_BITAXE:
-            raise ValueError(
-                f"Unsupported miner type for resume mining: {self.miner_type}"
-            )
+        """Resume mining on Bitaxe/NerdAxe.
 
-        try:
-            await self._async_request(
-                "POST",
-                API_SYSTEM_RESUME,
-                timeout=timeout or DEFAULT_TIMEOUT,
-            )
-            return True
-        except Exception as e:
-            _LOGGER.error(f"Failed to resume mining: {e}")
-            raise
+        Bitaxe resumes via POST /api/system/resume. NerdAxe resumes by
+        rebooting via POST /api/system/restart (shutdown is not persistent).
+        """
+        if self.miner_type == MINER_TYPE_BITAXE:
+            try:
+                await self._async_request(
+                    "POST",
+                    API_SYSTEM_RESUME,
+                    timeout=timeout or DEFAULT_TIMEOUT,
+                )
+                return True
+            except Exception as e:
+                _LOGGER.error(f"Failed to resume mining: {e}")
+                raise
+
+        if self.miner_type == MINER_TYPE_NERDAXE:
+            return await self.restart_system(timeout=timeout)
+
+        raise ValueError(
+            f"Unsupported miner type for resume mining: {self.miner_type}"
+        )
 
     async def set_workmode(
         self,
