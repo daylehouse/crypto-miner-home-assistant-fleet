@@ -1,5 +1,6 @@
 """Switch entities for Bitaxe/NerdAxe integration."""
 
+import time
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -21,6 +22,14 @@ from .const import (
 )
 from .coordinator import BitaxeDataUpdateCoordinator
 from .utils import bitaxe_mining_active, normalize_identifier
+
+# Minimum time to hold the optimistic state after pause/resume so the switch
+# does not bounce while the miner applies the change (NerdAxe resume reboots).
+_PENDING_MIN_HOLD_S = {MINER_TYPE_BITAXE: 10.0, MINER_TYPE_NERDAXE: 75.0}
+_PENDING_DEFAULT_MIN_HOLD_S = 30.0
+# Hard timeout after which the optimistic state is dropped regardless.
+_PENDING_HARD_TIMEOUT_S = 300.0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -150,6 +159,18 @@ class BitaxeMiningActiveSwitchEntity(CoordinatorEntity, SwitchEntity):
             "model": miner_type.capitalize(),
         }
         self._pending_state: bool | None = None
+        self._pending_since: float | None = None
+
+    @property
+    def available(self) -> bool:
+        """Stay available while a pause/resume action is pending.
+
+        NerdAxe resumes by rebooting, which briefly takes the miner offline;
+        keep the switch usable instead of flapping unavailable.
+        """
+        if self._pending_state is not None:
+            return True
+        return super().available
 
     @property
     def is_on(self) -> bool:
@@ -160,30 +181,50 @@ class BitaxeMiningActiveSwitchEntity(CoordinatorEntity, SwitchEntity):
         return bitaxe_mining_active(info)
 
     def _handle_coordinator_update(self) -> None:
-        """Refresh state and clear optimistic override once the API catches up."""
+        """Refresh state and clear the optimistic override once the API catches up.
+
+        The pending state is held for a minimum time so reboot-to-resume
+        (NerdAxe) and hashrate coast-down (pause) don't bounce the switch,
+        and dropped after a hard timeout so it can never get stuck.
+        """
         if self._pending_state is not None:
             info = self.coordinator.data.get("info", {}) if self.coordinator.data else {}
             actual_state = bitaxe_mining_active(info)
-            if actual_state == self._pending_state:
+            elapsed = (
+                time.monotonic() - self._pending_since
+                if self._pending_since is not None
+                else 0.0
+            )
+            min_hold = _PENDING_MIN_HOLD_S.get(
+                self._miner_type, _PENDING_DEFAULT_MIN_HOLD_S
+            )
+            if (
+                actual_state == self._pending_state and elapsed >= min_hold
+            ) or elapsed >= _PENDING_HARD_TIMEOUT_S:
                 self._pending_state = None
+                self._pending_since = None
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Resume mining (NerdAxe resumes by rebooting)."""
         self._pending_state = True
+        self._pending_since = time.monotonic()
         try:
             await self._api_client.resume_mining()
             await self.coordinator.async_request_refresh()
         except Exception:
             self._pending_state = None
+            self._pending_since = None
             raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Pause mining (NerdAxe pauses by shutting mining down)."""
         self._pending_state = False
+        self._pending_since = time.monotonic()
         try:
             await self._api_client.pause_mining()
             await self.coordinator.async_request_refresh()
         except Exception:
             self._pending_state = None
+            self._pending_since = None
             raise
