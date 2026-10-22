@@ -6,6 +6,8 @@ from urllib.parse import urlparse
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import format_mac
 
@@ -254,6 +256,44 @@ def _has_runtime_miner_entries(hass: HomeAssistant) -> bool:
     return False
 
 
+def _cleanup_stale_devices(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    miner_type: str,
+    device_slug: str,
+) -> None:
+    """Remove devices and entities registered under a stale identity slug.
+
+    Older versions recomputed the device slug from discovery on each boot, so
+    hostname/IP flip-flopping registered a duplicate device and entity set.
+    The slug is now pinned to the config entry value, so any device for this
+    entry that does not carry the current identifier is stale and removed.
+    """
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+    current_identifier = (DOMAIN, f"{miner_type}_{device_slug}")
+
+    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        identifiers = device.identifiers or set()
+        if any(identifier[0] != DOMAIN for identifier in identifiers):
+            continue
+        if not identifiers or current_identifier in identifiers:
+            continue
+
+        stale_entities = er.async_entries_for_device(
+            entity_registry, device.id, include_disabled_entities=True
+        )
+        _LOGGER.info(
+            "Removing stale duplicate device '%s' (%d entities) for %s",
+            device.name,
+            len(stale_entities),
+            entry.title,
+        )
+        for entity_entry in stale_entities:
+            entity_registry.async_remove(entity_entry.entity_id)
+        device_registry.async_remove_device(device.id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Bitaxe/NerdAxe from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -335,16 +375,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if removed_current_entry:
         return True
 
-    # Prefer a user-provided miner name (Avalon) for naming, then the
-    # discovered hostname, with fallback to host.
+    # Pin the device slug to the value stored in the entry: it anchors device
+    # identifiers and entity unique IDs. Recomputing it from discovery on
+    # every boot creates duplicate devices and entities when hostname
+    # resolution flips between IP and hostname.
     configured_miner_name = entry.data.get(CONF_MINER_NAME)
+    stored_slug = str(entry.data.get(CONF_DEVICE_SLUG) or "").strip()
+    stored_name = str(entry.data.get(CONF_DEVICE_NAME) or "").strip()
     if isinstance(configured_miner_name, str) and configured_miner_name.strip():
         device_name = f"{miner_type.capitalize()} {configured_miner_name.strip()}"
         device_slug = normalize_identifier(configured_miner_name)
     else:
-        preferred_host = _preferred_device_host(host, discovered_hostname)
-        device_name = f"{miner_type.capitalize()} {preferred_host}"
-        device_slug = normalize_identifier(preferred_host)
+        device_slug = stored_slug or normalize_identifier(
+            _preferred_device_host(host, discovered_hostname)
+        )
+        if isinstance(discovered_hostname, str) and _is_hostname(discovered_hostname):
+            # Upgrade the display name to the discovered hostname once known;
+            # never flap back to an IP-based name.
+            device_name = f"{miner_type.capitalize()} {discovered_hostname.strip()}"
+        elif stored_name:
+            device_name = stored_name
+        else:
+            device_name = f"{miner_type.capitalize()} {_preferred_device_host(host, discovered_hostname)}"
 
     if (
         entry.data.get(CONF_DEVICE_NAME) != device_name
@@ -362,6 +414,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 CONF_HOST: host,
             },
         )
+
+    _cleanup_stale_devices(hass, entry, miner_type, device_slug)
 
     # Store coordinator, API client, and host for service lookups
     _, _, threshold_default = overheat_threshold_profile(miner_type)

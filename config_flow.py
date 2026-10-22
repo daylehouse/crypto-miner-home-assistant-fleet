@@ -230,13 +230,20 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return user
 
-    def _pool_schema(self) -> vol.Schema:
+    def _pool_schema(
+        self, pools_override: Optional[list[dict[str, Any]]] = None
+    ) -> vol.Schema:
         """Build schema for up to three optional pool profiles.
 
         When other miners are already configured, copies their pool profiles and
         appends .hostname to each username so the new miner is identified.
+        Pass pools_override to prefill from a specific entry (reconfigure).
         """
-        existing_pools = self._find_existing_pools()
+        existing_pools = (
+            pools_override
+            if pools_override is not None
+            else self._find_existing_pools()
+        )
 
         if existing_pools:
             p1 = existing_pools[0] if len(existing_pools) > 0 else {}
@@ -676,25 +683,12 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_mismatch()
 
-            # Keep miner-name-based naming for entries that have one (Avalon)
-            miner_name = str(reconfigure_entry.data.get(CONF_MINER_NAME) or "").strip()
-            if miner_name:
-                device_name = f"{miner_type.capitalize()} {miner_name}"
-                device_slug = normalize_identifier(miner_name)
-            else:
-                device_name = self._discovered_device_name(info, host, miner_type)
-                device_slug = self._discovered_device_slug(info, host)
-
-            return self.async_update_reload_and_abort(
-                reconfigure_entry,
-                data_updates={
-                    CONF_HOST: host,
-                    CONF_MINER_TYPE: miner_type,
-                    CONF_DEVICE_NAME: device_name,
-                    CONF_DEVICE_SLUG: device_slug,
-                    CONF_POOLS: reconfigure_entry.data.get(CONF_POOLS, []),
-                },
-            )
+            # Stash validated data and continue to pool profile adjustment.
+            self._pending_info = info
+            self._pending_data = dict(reconfigure_entry.data)
+            self._pending_data[CONF_HOST] = host
+            self._pending_data[CONF_MINER_TYPE] = miner_type
+            return await self.async_step_reconfigure_pools()
 
         return self.async_show_form(
             step_id="reconfigure",
@@ -711,4 +705,67 @@ class AxeosConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             description_placeholders={"miner_type": current_type.capitalize()},
+        )
+
+    async def async_step_reconfigure_pools(
+        self, user_input: Optional[dict[str, Any]] = None
+    ) -> FlowResult:
+        """Adjust pool profiles for an existing miner entry."""
+        reconfigure_entry = self._get_reconfigure_entry()
+        entry_pools = list(reconfigure_entry.data.get(CONF_POOLS, []))
+
+        if user_input is not None:
+            pools, has_partial = self._extract_pools(user_input)
+            if has_partial:
+                return self.async_show_form(
+                    step_id="reconfigure_pools",
+                    data_schema=self._pool_schema(pools_override=entry_pools),
+                    errors={"base": "invalid_pool"},
+                    description_placeholders={
+                        "device_name": reconfigure_entry.data.get(CONF_DEVICE_NAME, "Miner"),
+                        "miner_hostname": self._miner_hostname(),
+                    },
+                )
+
+            miner_type = self._pending_data.get(
+                CONF_MINER_TYPE,
+                reconfigure_entry.data.get(CONF_MINER_TYPE, MINER_TYPE_BITAXE),
+            )
+            host = self._pending_data.get(
+                CONF_HOST, reconfigure_entry.data.get(CONF_HOST, "")
+            )
+
+            # Keep miner-name-based naming for entries that have one (Avalon);
+            # otherwise keep the pinned slug and use discovered naming.
+            miner_name = str(reconfigure_entry.data.get(CONF_MINER_NAME) or "").strip()
+            stored_slug = str(reconfigure_entry.data.get(CONF_DEVICE_SLUG) or "").strip()
+            if miner_name:
+                device_name = f"{miner_type.capitalize()} {miner_name}"
+                device_slug = normalize_identifier(miner_name)
+            else:
+                device_slug = stored_slug or self._discovered_device_slug(
+                    self._pending_info, host
+                )
+                device_name = self._discovered_device_name(
+                    self._pending_info, host, miner_type
+                )
+
+            return self.async_update_reload_and_abort(
+                reconfigure_entry,
+                data_updates={
+                    CONF_HOST: host,
+                    CONF_MINER_TYPE: miner_type,
+                    CONF_DEVICE_NAME: device_name,
+                    CONF_DEVICE_SLUG: device_slug,
+                    CONF_POOLS: pools,
+                },
+            )
+
+        return self.async_show_form(
+            step_id="reconfigure_pools",
+            data_schema=self._pool_schema(pools_override=entry_pools),
+            description_placeholders={
+                "device_name": reconfigure_entry.data.get(CONF_DEVICE_NAME, "Miner"),
+                "miner_hostname": self._miner_hostname(),
+            },
         )

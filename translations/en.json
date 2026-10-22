@@ -66,6 +66,27 @@
           "miner_type": "Miner Type",
           "host": "Host (IP or hostname)"
         }
+      },
+      "reconfigure_pools": {
+        "title": "Pool Profiles",
+        "description": "Adjust the pool profiles for {device_name}. Leave fields blank to skip a profile.\n\nEnter only the base username in each Pool User field. The integration automatically appends .{miner_hostname} when saving (final format: username.{miner_hostname}).",
+        "data": {
+          "pool1_name": "Pool 1 Name",
+          "pool1_url": "Pool 1 Stratum URL",
+          "pool1_port": "Pool 1 Port",
+          "pool1_user": "Pool 1 User (without .hostname)",
+          "pool1_password": "Pool 1 Password",
+          "pool2_name": "Pool 2 Name",
+          "pool2_url": "Pool 2 Stratum URL",
+          "pool2_port": "Pool 2 Port",
+          "pool2_user": "Pool 2 User (without .hostname)",
+          "pool2_password": "Pool 2 Password",
+          "pool3_name": "Pool 3 Name",
+          "pool3_url": "Pool 3 Stratum URL",
+          "pool3_port": "Pool 3 Port",
+          "pool3_user": "Pool 3 User (without .hostname)",
+          "pool3_password": "Pool 3 Password"
+        }
       }
     },
     "error": {
