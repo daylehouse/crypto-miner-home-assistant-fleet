@@ -371,6 +371,21 @@ def _cleanup_fleet_entities_for_entry(hass: HomeAssistant, entry_id: str) -> Non
             entity_registry.async_remove(registry_entry.entity_id)
 
 
+def _cleanup_retired_fleet_sensors(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove retired online/offline fleet sensors from the registry."""
+    retired_unique_ids = {
+        f"{DOMAIN}_fleet_miners_online",
+        f"{DOMAIN}_fleet_miners_offline",
+        f"{DOMAIN}_fleet_online_percentage",
+    }
+    entity_registry = er.async_get(hass)
+    for registry_entry in er.async_entries_for_config_entry(entity_registry, entry_id):
+        if registry_entry.domain != "sensor":
+            continue
+        if (registry_entry.unique_id or "") in retired_unique_ids:
+            entity_registry.async_remove(registry_entry.entity_id)
+
+
 def _cleanup_avalon_unsupported_entities_for_entry(
     hass: HomeAssistant,
     entry_id: str,
@@ -1337,6 +1352,7 @@ async def async_setup_entry(
     entry_type = config_entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_MINER)
 
     if entry_type == ENTRY_TYPE_FLEET:
+        _cleanup_retired_fleet_sensors(hass, config_entry.entry_id)
         for entry in hass.config_entries.async_entries(DOMAIN):
             if entry.entry_id == config_entry.entry_id:
                 continue
@@ -1397,8 +1413,6 @@ async def async_setup_entry(
             BitaxeFleetSensorEntity(hass, "fleet_miners_total", "Fleet Miners Configured"),
             BitaxeFleetSensorEntity(hass, "fleet_miners_active", "Fleet Miners Active"),
             BitaxeFleetSensorEntity(hass, "fleet_miners_inactive", "Fleet Miners Inactive"),
-            BitaxeFleetSensorEntity(hass, "fleet_miners_online", "Fleet Miners Online"),
-            BitaxeFleetSensorEntity(hass, "fleet_miners_offline", "Fleet Miners Offline"),
             BitaxeFleetSensorEntity(
                 hass,
                 "fleet_miners_asic_overheated",
@@ -1416,8 +1430,8 @@ async def async_setup_entry(
             ),
             BitaxeFleetSensorEntity(
                 hass,
-                "fleet_online_percentage",
-                "Fleet Miners Online Percentage",
+                "fleet_active_percentage",
+                "Fleet Miners Active Percentage",
                 PERCENTAGE,
             ),
             BitaxeFleetSensorEntity(
@@ -1520,14 +1534,12 @@ class BitaxeFleetSensorEntity(SensorEntity):
             "fleet_energy_efficiency": "mdi:gauge",
             "fleet_hashrate_per_watt": "mdi:lightning-bolt-circle",
             "fleet_miners_total": "mdi:server",
-            "fleet_miners_active": "mdi:account-group",
-            "fleet_miners_inactive": "mdi:account-group-outline",
-            "fleet_miners_online": "mdi:account-hard-hat",
-            "fleet_miners_offline": "mdi:account-hard-hat-outline",
+            "fleet_miners_active": "mdi:account-hard-hat",
+            "fleet_miners_inactive": "mdi:account-hard-hat-outline",
             "fleet_miners_asic_overheated": "mdi:chip",
             "fleet_miners_vr_overheated": "mdi:thermometer-lines",
             "fleet_miners_overheated": "mdi:thermometer-alert",
-            "fleet_online_percentage": "mdi:sack-percent",
+            "fleet_active_percentage": "mdi:sack-percent",
             "fleet_miners_unknown_pool": "mdi:help-network-outline",
         }.get(key, "mdi:server-network")
         if unit is not None:
@@ -1594,6 +1606,23 @@ class BitaxeFleetSensorEntity(SensorEntity):
             elif bitaxe_mining_active(info):
                 active_entries.append(entry_data)
         return active_entries
+
+    def _miner_names_by_state(self) -> tuple[list[str], list[str]]:
+        """Return (active, inactive) miner display names based on mining state."""
+        active_ids = {id(entry_data) for entry_data in self._active_mining_entries()}
+        active_names: list[str] = []
+        inactive_names: list[str] = []
+        for entry_data in self._fleet_entries():
+            name = str(
+                entry_data.get("device_name") or entry_data.get("host") or ""
+            ).strip()
+            if not name:
+                continue
+            if id(entry_data) in active_ids:
+                active_names.append(name)
+            else:
+                inactive_names.append(name)
+        return sorted(set(active_names)), sorted(set(inactive_names))
 
     @staticmethod
     def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -1813,6 +1842,12 @@ class BitaxeFleetSensorEntity(SensorEntity):
                 "asic_overheated_miner_hostnames": asic_hostnames,
                 "vr_overheated_miner_hostnames": vr_hostnames,
             }
+        if self._key == "fleet_miners_active":
+            active_names, _ = self._miner_names_by_state()
+            return {"active_miners": active_names}
+        if self._key == "fleet_miners_inactive":
+            _, inactive_names = self._miner_names_by_state()
+            return {"inactive_miners": inactive_names}
         return None
 
     @property
@@ -1891,12 +1926,6 @@ class BitaxeFleetSensorEntity(SensorEntity):
         if self._key == "fleet_miners_inactive":
             return max(len(self._configured_miner_entries()) - len(active_mining_entries), 0)
 
-        if self._key == "fleet_miners_online":
-            return len(active_mining_entries)
-
-        if self._key == "fleet_miners_offline":
-            return max(len(self._configured_miner_entries()) - len(active_mining_entries), 0)
-
         if self._key == "fleet_miners_asic_overheated":
             return len(self._overheated_miner_hostnames("asic"))
 
@@ -1908,7 +1937,7 @@ class BitaxeFleetSensorEntity(SensorEntity):
             vr_hostnames = self._overheated_miner_hostnames("vr")
             return len(set(asic_hostnames + vr_hostnames))
 
-        if self._key == "fleet_online_percentage":
+        if self._key == "fleet_active_percentage":
             total = len(self._configured_miner_entries())
             if total == 0:
                 return 0

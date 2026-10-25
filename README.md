@@ -120,9 +120,9 @@ Add each miner as its own config entry. Once your miners are online, add one fle
 | Fleet Energy Efficiency | Aggregate efficiency metric |
 | Fleet Hashrate per Watt | Fleet performance ratio |
 | Fleet Miners Configured | Number of miners added |
-| Fleet Miners Online | Online miner count |
-| Fleet Miners Offline | Offline miner count |
-| Fleet Miners Online Percentage | Online rate |
+| Fleet Miners Active | Actively mining count (exposes `active_miners` name list) |
+| Fleet Miners Inactive | Inactive miner count (exposes `inactive_miners` name list) |
+| Fleet Miners Active Percentage | Active mining rate |
 | Fleet Miners Unknown Pool | Miner count with unmatched pool data |
 | Fleet Miners Overheated | Count of miners above configured thresholds |
 
