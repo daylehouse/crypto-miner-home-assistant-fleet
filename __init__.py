@@ -364,22 +364,56 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.debug("Invalid discovered macAddr for entry %s: %s", entry.entry_id, discovered_mac)
 
     # Drop duplicate entries that point at the same physical miner (by MAC),
-    # e.g. a Goldshell Byte added via both its chassis and card IPs.
+    # e.g. a Goldshell Byte added via both its chassis and card IPs. Keep the
+    # entry with live mining data so a zeroed card-side view loses the race.
     if isinstance(resolved_unique_id, str) and resolved_unique_id.strip():
+
+        def _has_live_data(other_entry: ConfigEntry) -> bool:
+            other_runtime = hass.data.get(DOMAIN, {}).get(other_entry.entry_id, {})
+            other_coordinator = other_runtime.get("coordinator")
+            other_data = (
+                other_coordinator.data
+                if other_coordinator is not None and isinstance(other_coordinator.data, dict)
+                else {}
+            )
+            other_info = other_data.get("info", {})
+            if not isinstance(other_info, dict):
+                return False
+            return bool(other_info.get("hashRate") or other_info.get("power"))
+
+        current_info = coordinator.data.get("info", {}) if isinstance(coordinator.data, dict) else {}
+        current_live = bool(
+            isinstance(current_info, dict)
+            and (current_info.get("hashRate") or current_info.get("power"))
+        )
+
         for other in hass.config_entries.async_entries(DOMAIN):
             if other.entry_id == entry.entry_id:
                 continue
             if _entry_type(other) != ENTRY_TYPE_MINER:
                 continue
-            if other.unique_id == resolved_unique_id:
+            if other.unique_id != resolved_unique_id:
+                continue
+
+            if current_live or not _has_live_data(other):
+                # This entry has the live view (or tie): drop the other one.
                 _LOGGER.warning(
-                    "Removing duplicate entry %s (%s); same physical miner as %s",
+                    "Removing duplicate entry %s; same physical miner as %s (%s)",
+                    other.title,
                     entry.title,
                     host,
-                    other.title,
                 )
-                await hass.config_entries.async_remove(entry.entry_id)
-                return True
+                await hass.config_entries.async_remove(other.entry_id)
+                continue
+
+            _LOGGER.warning(
+                "Removing duplicate entry %s (%s); same physical miner as %s",
+                entry.title,
+                host,
+                other.title,
+            )
+            await hass.config_entries.async_remove(entry.entry_id)
+            return True
 
     # Prefer discovered hostname for UI/device naming, with fallback to host.
     discovered_hostname = coordinator.data.get("info", {}).get("hostname")
