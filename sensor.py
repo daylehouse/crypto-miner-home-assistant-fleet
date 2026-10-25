@@ -283,6 +283,33 @@ def _warning_threshold_c(overheat_threshold_c: float) -> float:
     return float(overheat_threshold_c) - 1.0
 
 
+def _info_target_temp_c(info: dict[str, Any]) -> Any:
+    """Return miner target temperature from info across miner types."""
+    if not isinstance(info, dict):
+        return None
+
+    raw = info.get("temptarget") or info.get("tempTarget") or info.get("target_temp")
+    if raw is not None:
+        try:
+            return round(float(raw), 2)
+        except (TypeError, ValueError):
+            pass
+
+    fans = info.get("fans")
+    if isinstance(fans, list) and fans:
+        first = fans[0]
+        if isinstance(first, dict):
+            pid = first.get("pid")
+            if isinstance(pid, dict):
+                raw = pid.get("targetTemp")
+                if raw is not None:
+                    try:
+                        return round(float(raw), 2)
+                    except (TypeError, ValueError):
+                        return None
+    return None
+
+
 def _cleanup_fleet_entities_for_entry(hass: HomeAssistant, entry_id: str) -> None:
     """Remove stale fleet sensor entities bound to a specific config entry."""
     entity_registry = er.async_get(hass)
@@ -304,7 +331,7 @@ def _cleanup_avalon_unsupported_entities_for_entry(
         if registry_entry.domain != "sensor":
             continue
         unique_id = registry_entry.unique_id or ""
-        if unique_id.endswith("_core_voltage_set"):
+        if unique_id.endswith(("_core_voltage_set", "_temp_vr", "_vr_overheated")):
             entity_registry.async_remove(registry_entry.entity_id)
 
 
@@ -481,11 +508,29 @@ BITAXE_SENSORS: list[BitaxeSensorEntityDescription] = [
     # Temperature metrics
     BitaxeSensorEntityDescription(
         key="temp_asic",
-        name="ASIC Temperature",
+        name="ASIC Temp High",
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         value_fn=lambda data: round(data.get("info", {}).get("temp", 0), 2),
+    ),
+    BitaxeSensorEntityDescription(
+        key="temp_asic_avg",
+        name="ASIC Temp Avg",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get("info", {}).get("asicTempAvg"),
+    ),
+    BitaxeSensorEntityDescription(
+        key="temp_target",
+        name="Target Temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _info_target_temp_c(data.get("info", {})),
     ),
     BitaxeSensorEntityDescription(
         key="temp_exhaust",
@@ -1378,15 +1423,18 @@ async def async_setup_entry(
         for sensor_description in sensor_list
         if not (
             miner_type == MINER_TYPE_AVALON and sensor_description.key in [
-                "core_voltage_set", "voltage", "current", "free_heap"
+                "core_voltage_set", "voltage", "current", "free_heap",
+                "temp_vr", "vr_overheated",
             ]
         )
         if not (
-            miner_type != MINER_TYPE_AVALON and sensor_description.key == "temp_exhaust"
+            miner_type != MINER_TYPE_AVALON and sensor_description.key in [
+                "temp_exhaust", "temp_asic_avg",
+            ]
         )
         if not (
             miner_type == MINER_TYPE_GOLDSHELL and sensor_description.key in [
-                "pool_url", "pool_port", "pool_user", "pool_difficulty"
+                "pool_url", "pool_port", "pool_user", "pool_difficulty", "temp_target",
             ]
         )
     ]

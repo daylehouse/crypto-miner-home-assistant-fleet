@@ -637,23 +637,66 @@ class BitaxeAPIClient:
             or self.host
         )
 
-        hashrate_gh = 0.0
-        try:
-            hashrate_gh = float(summary.get("MHS av") or summary.get("MHS 5s") or 0) / 1000.0
-        except (TypeError, ValueError):
-            hashrate_gh = 0.0
+        def _mhs_to_gh(key: str) -> float | None:
+            """Convert summary MHS fields (MH/s) to GH/s."""
+            raw = summary.get(key)
+            if raw is None:
+                return None
+            try:
+                return float(raw) / 1000.0
+            except (TypeError, ValueError):
+                return None
+
+        def _estats_rate_gh(*keys: str) -> float | None:
+            """Return estats misc hashrate fields (already GH/s)."""
+            for key in keys:
+                raw = misc.get(key)
+                if raw is None:
+                    continue
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        def _first_temp(*keys: str) -> float | None:
+            """Return first present temperature field without falsy-zero skips."""
+            for key in keys:
+                raw = temps.get(key)
+                if raw is None:
+                    continue
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        mhs_av = _mhs_to_gh("MHS av")
+        mhs_5s = _mhs_to_gh("MHS 5s")
+        mhs_5m = _mhs_to_gh("MHS 5m")
+        mhs_15m = _mhs_to_gh("MHS 15m")
+
+        # Live hashrate: prefer estats GHSspd/GHSavg (GH/s), then summary.
+        hashrate_gh = _estats_rate_gh("GHSspd", "GHSavg")
+        if hashrate_gh is None:
+            hashrate_gh = mhs_5s if mhs_5s is not None else (mhs_av or 0.0)
+
+        asic_temp = _first_temp("TMax", "MTmax", "OTemp")
 
         info: Dict[str, Any] = {
             "hashRate": round(hashrate_gh, 3),
-            "hashRate_1m": round(hashrate_gh, 3),
-            "hashRate_10m": round(hashrate_gh, 3),
-            "hashRate_1h": round(hashrate_gh, 3),
+            "hashRate_1m": round(mhs_5s if mhs_5s is not None else hashrate_gh, 3),
+            "hashRate_10m": round(mhs_5m if mhs_5m is not None else hashrate_gh, 3),
+            "hashRate_1h": round(mhs_15m if mhs_15m is not None else hashrate_gh, 3),
             "power": ps.get("PS_Power") or 0,
             "coreVoltageActual": hashboard_voltage,
             "frequency": frequency_mhz,
-            "temp": temps.get("TMax") or temps.get("MTmax") or temps.get("OTemp") or 0,
-            "exhaustTemp": temps.get("OTemp"),
-            "vrTemp": temps.get("TAvg") or temps.get("MTavg"),
+            "temp": asic_temp if asic_temp is not None else 0,
+            "asicTempAvg": _first_temp("TAvg", "MTavg"),
+            "exhaustTemp": _first_temp("OTemp"),
+            # Avalon reports no VR temperature; TAvg is the ASIC average.
+            "vrTemp": None,
+            "temptarget": _first_temp("TarT"),
             "fanspeed": fans.get("FanR") or 0,
             "fanrpm": fans.get("Fan1"),
             "sharesAccepted": summary.get("Accepted") or 0,
