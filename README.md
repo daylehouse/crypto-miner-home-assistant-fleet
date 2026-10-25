@@ -43,6 +43,19 @@ Version 1.2.0 adds Goldshell Byte support with dual-algorithm ALEO and LTC monit
 | Goldshell idle mode switch and power mode select | ✅ ACTIVE |
 | Companion-ready entity model for Bitcoin Miner Card dashboards | ✅ ACTIVE |
 | One-touch pool selection for up to three predefined pools | ✅ ACTIVE |
+| Bundled Bitcoin Miner Card auto-registered on install | ✅ ACTIVE |
+
+---
+
+## 🃏 BUNDLED DASHBOARD CARD
+
+The [Bitcoin Miner Card](https://github.com/daylehouse/bitcoin-miner-card) now ships inside this integration and is auto-registered on startup — no separate card install required. Add it to any dashboard with:
+
+```yaml
+type: custom:bitcoin-miner-card
+```
+
+Card source lives in `card/`; to rebuild after changes run `cd card && npm install && npm run build`, then copy the `card/dist/` outputs (`bitcoin-miner-card.js`, images, fonts) into `www/`.
 
 ---
 

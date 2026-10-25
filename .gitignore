@@ -4,3 +4,7 @@ __pycache__/
 *.log
 *.code-workspace
 TESTING.md
+
+# Card build artifacts (built bundle is vendored in www/)
+card/node_modules/
+card/dist/
