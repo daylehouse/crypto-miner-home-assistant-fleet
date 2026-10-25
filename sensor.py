@@ -254,8 +254,15 @@ def _first_pool_numeric(info: dict[str, Any], *keys: str) -> Any:
     return _numeric_recursive_first_present(first_pool, *keys)
 
 
-def _asic_temp_c(info: dict[str, Any]) -> float | None:
-    """Return ASIC temperature in Celsius when available."""
+def _asic_temp_c(info: dict[str, Any], miner_type: str = "") -> float | None:
+    """Return ASIC overheat reference temperature in Celsius when available."""
+    if miner_type == MINER_TYPE_AVALON:
+        # Avalon alerts track the ASIC average; temp/TMax is the high reading.
+        try:
+            raw = info.get("asicTempAvg")
+            return float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
     try:
         raw = info.get("temp")
         return float(raw) if raw is not None else None
@@ -263,8 +270,15 @@ def _asic_temp_c(info: dict[str, Any]) -> float | None:
         return None
 
 
-def _vr_temp_c(info: dict[str, Any]) -> float | None:
-    """Return VR temperature in Celsius when available."""
+def _vr_temp_c(info: dict[str, Any], miner_type: str = "") -> float | None:
+    """Return VR/exhaust overheat reference temperature in Celsius when available."""
+    if miner_type == MINER_TYPE_AVALON:
+        # Avalon has no VR probe; the VR threshold tracks exhaust temp instead.
+        try:
+            raw = info.get("exhaustTemp")
+            return float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
     try:
         raw = info.get("vrTemp")
         return float(raw) if raw is not None else None
@@ -331,7 +345,7 @@ def _cleanup_avalon_unsupported_entities_for_entry(
         if registry_entry.domain != "sensor":
             continue
         unique_id = registry_entry.unique_id or ""
-        if unique_id.endswith(("_core_voltage_set", "_temp_vr", "_vr_overheated")):
+        if unique_id.endswith(("_core_voltage_set", "_temp_vr")):
             entity_registry.async_remove(registry_entry.entity_id)
 
 
@@ -1424,7 +1438,7 @@ async def async_setup_entry(
         if not (
             miner_type == MINER_TYPE_AVALON and sensor_description.key in [
                 "core_voltage_set", "voltage", "current", "free_heap",
-                "temp_vr", "vr_overheated",
+                "temp_vr",
             ]
         )
         if not (
@@ -1707,7 +1721,7 @@ class BitaxeFleetSensorEntity(SensorEntity):
                 continue
 
             if temp_source == "asic":
-                temp_c = _asic_temp_c(info)
+                temp_c = _asic_temp_c(info, miner_type)
                 threshold = float(
                     entry_data.get(
                         CONF_ASIC_OVERHEAT_THRESHOLD_C,
@@ -1718,7 +1732,7 @@ class BitaxeFleetSensorEntity(SensorEntity):
                     )
                 )
             else:
-                temp_c = _vr_temp_c(info)
+                temp_c = _vr_temp_c(info, miner_type)
                 threshold = float(
                     entry_data.get(
                         CONF_VR_OVERHEAT_THRESHOLD_C,
@@ -1911,6 +1925,9 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = (
             f"{miner_type}_{self._device_slug}_{sensor_description.key}"
         )
+        if miner_type == MINER_TYPE_AVALON and sensor_description.key == "vr_overheated":
+            # Avalon tracks exhaust temperature with the VR threshold.
+            self._attr_name = "Exhaust Overheated"
         self._attr_icon = SENSOR_ICONS.get(sensor_description.key)
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"{miner_type}_{self._device_slug}")},
@@ -1939,7 +1956,7 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
             runtime_entry = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
 
             if self.entity_description.key == "overheated":
-                temp_c = _asic_temp_c(info)
+                temp_c = _asic_temp_c(info, self._miner_type)
                 threshold = float(
                     runtime_entry.get(
                         CONF_ASIC_OVERHEAT_THRESHOLD_C,
@@ -1950,7 +1967,7 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
                     )
                 )
             elif self.entity_description.key == "vr_overheated":
-                temp_c = _vr_temp_c(info)
+                temp_c = _vr_temp_c(info, self._miner_type)
                 threshold = float(
                     runtime_entry.get(
                         CONF_VR_OVERHEAT_THRESHOLD_C,

@@ -29,6 +29,7 @@ from .const import (
     CONF_TARGET_TEMP_C,
     CONF_VR_OVERHEAT_THRESHOLD_C,
     DOMAIN,
+    MINER_TYPE_AVALON,
     MINER_TYPE_BITAXE,
     MINER_TYPE_GOLDSHELL,
     MINER_TYPE_NERDAXE,
@@ -346,7 +347,11 @@ async def async_setup_entry(
                     device_name,
                     device_slug,
                     CONF_VR_OVERHEAT_THRESHOLD_C,
-                    "VR Overheat Alert Threshold",
+                    (
+                        "Exhaust Overheat Alert Threshold"
+                        if miner_type == MINER_TYPE_AVALON
+                        else "VR Overheat Alert Threshold"
+                    ),
                     current_vr_value,
                     min_value,
                     max_value,
