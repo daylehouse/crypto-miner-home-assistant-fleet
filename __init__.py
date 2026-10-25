@@ -363,6 +363,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except ValueError:
             _LOGGER.debug("Invalid discovered macAddr for entry %s: %s", entry.entry_id, discovered_mac)
 
+    # Drop duplicate entries that point at the same physical miner (by MAC),
+    # e.g. a Goldshell Byte added via both its chassis and card IPs.
+    if isinstance(resolved_unique_id, str) and resolved_unique_id.strip():
+        for other in hass.config_entries.async_entries(DOMAIN):
+            if other.entry_id == entry.entry_id:
+                continue
+            if _entry_type(other) != ENTRY_TYPE_MINER:
+                continue
+            if other.unique_id == resolved_unique_id:
+                _LOGGER.warning(
+                    "Removing duplicate entry %s (%s); same physical miner as %s",
+                    entry.title,
+                    host,
+                    other.title,
+                )
+                await hass.config_entries.async_remove(entry.entry_id)
+                return True
+
     # Prefer discovered hostname for UI/device naming, with fallback to host.
     discovered_hostname = coordinator.data.get("info", {}).get("hostname")
     removed_current_entry = await _async_cleanup_duplicate_ip_entries(

@@ -324,6 +324,42 @@ def _info_target_temp_c(info: dict[str, Any]) -> Any:
     return None
 
 
+def _miner_device_info(
+    miner_type: str,
+    device_name: str,
+    device_slug: str,
+    sensor_key: str,
+) -> dict[str, Any]:
+    """Return device info, splitting Goldshell per-card sensors onto card devices.
+
+    The Goldshell Byte is one chassis with two miner cards; ALEO (card 1) and
+    LTC (card 2) sensors attach to their own card devices linked back to the
+    chassis device.
+    """
+    if miner_type == MINER_TYPE_GOLDSHELL:
+        card: tuple[str, str] | None = None
+        if sensor_key.startswith("aleo_"):
+            card = ("aleo", "ALEO")
+        elif sensor_key.startswith("ltc_"):
+            card = ("ltc", "LTC")
+        if card:
+            card_slug, card_label = card
+            return {
+                "identifiers": {(DOMAIN, f"goldshell_{device_slug}_{card_slug}")},
+                "name": f"{device_name} {card_label}",
+                "manufacturer": "Goldshell",
+                "model": f"Goldshell Byte Card ({card_label})",
+                "via_device": (DOMAIN, f"goldshell_{device_slug}"),
+            }
+
+    return {
+        "identifiers": {(DOMAIN, f"{miner_type}_{device_slug}")},
+        "name": device_name,
+        "manufacturer": "Bitaxe Project",
+        "model": miner_type.capitalize(),
+    }
+
+
 def _cleanup_fleet_entities_for_entry(hass: HomeAssistant, entry_id: str) -> None:
     """Remove stale fleet sensor entities bound to a specific config entry."""
     entity_registry = er.async_get(hass)
@@ -1929,12 +1965,12 @@ class BitaxeSensorEntity(CoordinatorEntity, SensorEntity):
             # Avalon tracks exhaust temperature with the VR threshold.
             self._attr_name = "Exhaust Overheated"
         self._attr_icon = SENSOR_ICONS.get(sensor_description.key)
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"{miner_type}_{self._device_slug}")},
-            "name": self._device_name,
-            "manufacturer": "Bitaxe Project",
-            "model": miner_type.capitalize(),
-        }
+        self._attr_device_info = _miner_device_info(
+            miner_type,
+            self._device_name,
+            self._device_slug,
+            sensor_description.key,
+        )
 
     @property
     def native_value(self) -> Optional[Any]:

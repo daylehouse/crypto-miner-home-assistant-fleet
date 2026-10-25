@@ -406,13 +406,32 @@ class BitaxeOverheatThresholdNumber(NumberEntity):
             max(self._attr_native_min_value, min(self._attr_native_max_value, current_value))
         )
         self._attr_unique_id = f"{miner_type}_{self._device_slug}_{threshold_key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"{miner_type}_{self._device_slug}")},
+        self._attr_device_info = self._build_device_info()
+        self._remove_coordinator_listener: Callable[[], None] | None = None
+
+    def _build_device_info(self) -> dict[str, Any]:
+        """Return device info, placing per-card thresholds on card devices."""
+        if self._miner_type == MINER_TYPE_GOLDSHELL:
+            card: tuple[str, str] | None = None
+            if self._threshold_key == CONF_GOLDSHELL_ALEO_OVERHEAT_THRESHOLD_C:
+                card = ("aleo", "ALEO")
+            elif self._threshold_key == CONF_GOLDSHELL_LTC_OVERHEAT_THRESHOLD_C:
+                card = ("ltc", "LTC")
+            if card:
+                card_slug, card_label = card
+                return {
+                    "identifiers": {(DOMAIN, f"goldshell_{self._device_slug}_{card_slug}")},
+                    "name": f"{self._device_name} {card_label}",
+                    "manufacturer": "Goldshell",
+                    "model": f"Goldshell Byte Card ({card_label})",
+                    "via_device": (DOMAIN, f"goldshell_{self._device_slug}"),
+                }
+        return {
+            "identifiers": {(DOMAIN, f"{self._miner_type}_{self._device_slug}")},
             "name": self._device_name,
             "manufacturer": "Bitaxe Project",
-            "model": miner_type.capitalize(),
+            "model": self._miner_type.capitalize(),
         }
-        self._remove_coordinator_listener: Callable[[], None] | None = None
 
     @property
     def _is_api_backed_target(self) -> bool:

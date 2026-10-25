@@ -122,7 +122,10 @@ class BitaxeAPIClient:
         match = re.search(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", raw)
         if not match:
             return ""
-        return match.group(0).upper()
+        mac = match.group(0).upper()
+        if mac == "00:00:00:00:00:00":
+            return ""
+        return mac
 
     async def get_system_info(self, timeout: Optional[float] = None) -> Dict[str, Any]:
         """Fetch system information from /api/system/info.
@@ -718,13 +721,6 @@ class BitaxeAPIClient:
             "uptimeSeconds": summary.get("Elapsed") or 0,
             "stratum": {"pools": pools},
         }
-        # Fetch and merge device info (firmware, MAC, hardware)
-        try:
-            device_info = await self._goldshell_get_device_info(timeout=timeout)
-            info.update(device_info)
-        except Exception as e:
-            _LOGGER.debug(f"Failed to fetch Goldshell device info: {e}")
-
         return info
 
     def _avalon_find_chip_type(self, *payloads: Any) -> str:
@@ -1212,6 +1208,12 @@ class BitaxeAPIClient:
             info.update(device_info)
         except Exception as e:
             _LOGGER.debug("Failed to fetch Goldshell device info: %s", e)
+
+        # Expose the chassis MAC under the shared macAddr key so config flow
+        # and runtime dedupe treat both cards as one physical device.
+        goldshell_mac = info.get("mac_address")
+        if goldshell_mac:
+            info["macAddr"] = goldshell_mac
 
         # Merge read-only pool monitoring data from /mcb/pools.
         try:
