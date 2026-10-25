@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
-from homeassistant.components.frontend import add_extra_module_url
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -306,30 +306,32 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def _async_register_bundled_card(hass: HomeAssistant) -> None:
     """Serve the bundled Bitcoin Miner Card and load it as a frontend module."""
-    www_dir = Path(__file__).parent / "www"
-    card_file = www_dir / "bitcoin-miner-card.js"
-    if not card_file.is_file():
-        _LOGGER.debug("Bundled card not found at %s", card_file)
-        return
-
     try:
-        integration = await async_get_integration(hass, DOMAIN)
-        version = integration.version or "0"
-    except Exception:  # broad-except: version is only used for cache busting
-        version = "0"
+        card_file = Path(__file__).parent / "www" / "bitcoin-miner-card.js"
+        if not card_file.is_file():
+            _LOGGER.debug("Bundled card not found at %s", card_file)
+            return
 
-    # Card assets (background, overheat image, fonts) resolve relative to the
-    # card JS via import.meta.url, so the whole www directory is served.
-    card_url = f"/{DOMAIN}_card"
-    try:
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(card_url, str(www_dir), cache_headers=False)]
-        )
-    except RuntimeError:
-        pass  # already registered (e.g. after reload)
+        try:
+            integration = await async_get_integration(hass, DOMAIN)
+            version = integration.version or "0"
+        except Exception:  # broad-except: version is only used for cache busting
+            version = "0"
 
-    add_extra_module_url(hass, f"{card_url}/bitcoin-miner-card.js?v={version}")
-    _LOGGER.info("Bitcoin Miner Card available at %s/bitcoin-miner-card.js", card_url)
+        # Card assets (background, overheat image, fonts) resolve relative to the
+        # card JS via import.meta.url, so the whole www directory is served.
+        card_url = f"/{DOMAIN}_card"
+        try:
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(card_url, str(card_file.parent), cache_headers=False)]
+            )
+        except RuntimeError:
+            pass  # already registered (e.g. after reload)
+
+        add_extra_js_url(hass, f"{card_url}/bitcoin-miner-card.js?v={version}")
+        _LOGGER.info("Bitcoin Miner Card available at %s/bitcoin-miner-card.js", card_url)
+    except Exception as err:  # card registration must never break setup
+        _LOGGER.debug("Could not register bundled card: %s", err)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
