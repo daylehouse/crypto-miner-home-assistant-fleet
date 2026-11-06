@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.loader import async_get_integration
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -300,8 +300,71 @@ def _cleanup_stale_devices(
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the integration domain and serve the bundled Lovelace card."""
+    _register_card_api(hass)
     await _async_register_bundled_card(hass)
     return True
+
+
+# Card config field -> entity unique-ID key suffix.
+CARD_ENTITY_KEYS: dict[str, str] = {
+    "title_entity": "hostname",
+    "miner_name_entity": "ipv4_address",
+    "hashrate_entity": "hashrate",
+    "temperature_entity": "temp_asic",
+    "vr_temp_entity": "temp_vr",
+    "overheat_entity": "vr_overheated",
+    "power_entity": "power",
+    "model_entity": "device_model",
+    "fan_entity": "fan_speed",
+    "mining_active_entity": "mining_active",
+    "mining_pool_select_entity": "active_pool",
+    "pool_url_entity": "pool_url",
+    "pool_port_entity": "pool_port",
+    "shares_accepted_entity": "shares_accepted",
+    "shares_rejected_entity": "shares_rejected",
+    "all_time_best_difficulty_entity": "best_diff",
+    "session_best_difficulty_entity": "best_session_diff",
+}
+
+
+def _register_card_api(hass: HomeAssistant) -> None:
+    """Expose a websocket command that maps a miner device to the card's entities."""
+    try:
+        import voluptuous as vol
+        from homeassistant.components import websocket_api
+
+        @websocket_api.websocket_command(
+            {
+                vol.Required("type"): f"{DOMAIN}/card_entities",
+                vol.Required("device_id"): str,
+            }
+        )
+        @callback
+        def ws_card_entities(hass, connection, msg):
+            device = dr.async_get(hass).async_get(msg["device_id"])
+            identifier = next(
+                (ident[1] for ident in (device.identifiers if device else ()) if ident[0] == DOMAIN),
+                None,
+            )
+            if identifier is None:
+                connection.send_result(msg["id"], {})
+                return
+
+            # Unique IDs are f"{miner_type}_{slug}_{key}", matching the device identifier.
+            prefix = f"{identifier}_"
+            by_key = {
+                entry.unique_id[len(prefix):]: entry.entity_id
+                for entry in er.async_entries_for_device(er.async_get(hass), device.id)
+                if entry.platform == DOMAIN and (entry.unique_id or "").startswith(prefix)
+            }
+            connection.send_result(
+                msg["id"],
+                {field: by_key[key] for field, key in CARD_ENTITY_KEYS.items() if key in by_key},
+            )
+
+        websocket_api.async_register_command(hass, ws_card_entities)
+    except Exception as err:  # card helpers must never break setup
+        _LOGGER.debug("Could not register card API: %s", err)
 
 
 async def _async_register_bundled_card(hass: HomeAssistant) -> None:

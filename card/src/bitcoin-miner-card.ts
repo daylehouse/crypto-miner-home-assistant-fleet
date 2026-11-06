@@ -62,10 +62,12 @@ interface HomeAssistant {
   states: Record<string, HomeAssistantEntityState>;
   connection?: HomeAssistantConnection;
   callService?: (domain: string, service: string, serviceData?: Record<string, unknown>) => void;
+  callWS?: <T>(message: Record<string, unknown>) => Promise<T>;
 }
 
 interface BitcoinMinerCardConfig {
   type?: string;
+  device_id?: string;
   title_text?: string;
   title_entity?: string;
   miner_name_entity?: string;
@@ -128,6 +130,12 @@ export class BitcoinMinerCard extends LitElement {
 
   @property({ attribute: false }) public config?: BitcoinMinerCardConfig;
 
+  private userConfig?: BitcoinMinerCardConfig;
+
+  private autoEntities: Record<string, string> = {};
+
+  private autoEntitiesDeviceId = "";
+
   private chart: Chart | null = null;
 
   private chartData: AlignedChartData = {
@@ -175,6 +183,7 @@ export class BitcoinMinerCard extends LitElement {
   public static getConfigForm(): ConfigForm {
     return {
       schema: [
+        { name: "device_id", selector: { device: { integration: "axeos" } } },
         { name: "title_text", selector: { text: {} } },
         { name: "title_entity", selector: { entity: {} } },
         { name: "miner_name_entity", selector: { entity: {} } },
@@ -210,6 +219,8 @@ export class BitcoinMinerCard extends LitElement {
       ],
       computeLabel: (schema) => {
         switch (schema.name) {
+          case "device_id":
+            return "Miner Device";
           case "title_text":
             return "Title Text";
           case "title_entity":
@@ -254,6 +265,8 @@ export class BitcoinMinerCard extends LitElement {
       },
       computeHelper: (schema) => {
         switch (schema.name) {
+          case "device_id":
+            return "Fills in the entities below from this miner. Any entity you set explicitly overrides it.";
           case "title_text":
             return "Optional free-text title. When set, this overrides Title Entity.";
           case "title_entity":
@@ -296,11 +309,51 @@ export class BitcoinMinerCard extends LitElement {
       throw new Error("Invalid configuration for bitcoin-miner-card");
     }
 
-    this.config = {
+    this.userConfig = {
       overheat_threshold: 85,
       chart_span_minutes: 60,
       ...config
     };
+    this.config = this.buildEffectiveConfig();
+  }
+
+  private buildEffectiveConfig(): BitcoinMinerCardConfig {
+    const explicit = Object.fromEntries(
+      Object.entries(this.userConfig ?? {}).filter(([, value]) => value !== undefined && value !== "")
+    );
+    return { ...this.autoEntities, ...explicit } as BitcoinMinerCardConfig;
+  }
+
+  private ensureAutoEntities(): void {
+    const deviceId = this.userConfig?.device_id ?? "";
+    if (deviceId === this.autoEntitiesDeviceId) {
+      return;
+    }
+
+    if (!deviceId) {
+      this.autoEntitiesDeviceId = "";
+      this.autoEntities = {};
+      this.config = this.buildEffectiveConfig();
+      return;
+    }
+
+    if (!this.hass?.callWS) {
+      return;
+    }
+
+    // Set before the request so repeated hass updates do not re-request.
+    this.autoEntitiesDeviceId = deviceId;
+    this.autoEntities = {};
+    void this.hass
+      .callWS<Record<string, string>>({ type: "axeos/card_entities", device_id: deviceId })
+      .then((resolved) => {
+        if (this.autoEntitiesDeviceId !== deviceId) {
+          return;
+        }
+        this.autoEntities = resolved ?? {};
+        this.config = this.buildEffectiveConfig();
+      })
+      .catch(() => undefined);
   }
 
   public getCardSize(): number {
@@ -487,6 +540,10 @@ export class BitcoinMinerCard extends LitElement {
   }
 
   protected willUpdate(changedProperties: PropertyValues<this>): void {
+    if (changedProperties.has("hass") || changedProperties.has("config")) {
+      this.ensureAutoEntities();
+    }
+
     if (
       changedProperties.has("hass") ||
       changedProperties.has("config")
@@ -1107,7 +1164,7 @@ export class BitcoinMinerCard extends LitElement {
       --bm-title-top: 11%;
       --bm-title-width: 47%;
       --bm-fan-top: 12.5%;
-      --bm-fan-left: 73%;
+      --bm-fan-left: calc(62.25% + clamp(0.99rem, 3.28cqw, 1.84rem) + 0.5rem);
       --bm-gear-top: 12.5%;
       --bm-gear-left: 92%;
       --bm-pause-top: 12.5%;
@@ -1609,7 +1666,7 @@ export class BitcoinMinerCard extends LitElement {
 
     @media (max-width: 540px) {
       :host {
-        --bm-fan-left: 71.5%;
+        --bm-fan-left: calc(62.25% + clamp(0.86rem, 3.02cqw, 1.3rem) + 0.28rem);
         --bm-gear-left: 93%;
         --bm-gear-top: 12.8%;
         --bm-pause-left: 83.5%;
