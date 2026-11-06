@@ -74,6 +74,7 @@ interface BitcoinMinerCardConfig {
   vr_temp_entity?: string;
   overheat_entity?: string;
   fan_entity?: string;
+  mining_active_entity?: string;
   mining_pool_select_entity?: string;
   pool_url_entity?: string;
   pool_port_entity?: string;
@@ -182,6 +183,7 @@ export class BitcoinMinerCard extends LitElement {
         { name: "vr_temp_entity", selector: { entity: {} } },
         { name: "overheat_entity", selector: { entity: {} } },
         { name: "fan_entity", selector: { entity: {} } },
+        { name: "mining_active_entity", selector: { entity: { domain: "switch" } } },
         { name: "mining_pool_select_entity", selector: { entity: {} } },
         { name: "pool_url_entity", selector: { entity: {} } },
         { name: "pool_port_entity", selector: { entity: {} } },
@@ -224,6 +226,8 @@ export class BitcoinMinerCard extends LitElement {
             return "Overheat Entity (0/1)";
           case "fan_entity":
             return "Fan Entity";
+          case "mining_active_entity":
+            return "Mining Active Switch Entity";
           case "mining_pool_select_entity":
             return "Mining Pool Select Entity";
           case "pool_url_entity":
@@ -262,6 +266,8 @@ export class BitcoinMinerCard extends LitElement {
             return "VR temperature sensor shown in the chart.";
           case "fan_entity":
             return "Fan speed sensor shown as percent.";
+          case "mining_active_entity":
+            return "Mining Active switch for this miner; the pause button toggles it.";
           case "mining_pool_select_entity":
             return "Home Assistant select entity used by the popup menu for pool selection.";
           case "pool_url_entity":
@@ -354,6 +360,12 @@ export class BitcoinMinerCard extends LitElement {
     const fanSpinStyles = this.getFanSpinStyles(fanPercentage);
     const fanDisplayValue =
       fanPercentage === null ? this.formatState(fan) : `${Math.round(fanPercentage)} %`;
+    const miningActiveEntityId = this.config.mining_active_entity;
+    const miningActiveState = miningActiveEntityId
+      ? this.hass?.states?.[miningActiveEntityId]?.state
+      : undefined;
+    const isMiningPaused = miningActiveState === "off";
+    const miningToggleLabel = isMiningPaused ? "Resume mining" : "Pause mining";
     const miningPools = this.getMiningPoolOptionsFromSelectEntity();
     const hasMiningPools = miningPools.length > 0;
     const activeMiningPool = this.getActiveMiningPool(miningPools);
@@ -385,6 +397,17 @@ export class BitcoinMinerCard extends LitElement {
             <span class="fan-icon" style=${styleMap(fanSpinStyles)} aria-hidden="true"></span>
             <span class="fan-value">${fanDisplayValue}</span>
           </div>
+          ${miningActiveEntityId
+            ? html`<button
+                class="mining-toggle-button ${isMiningPaused ? "is-paused" : ""}"
+                @click=${this.onMiningActiveToggle}
+                ?disabled=${miningActiveState !== "on" && miningActiveState !== "off"}
+                title=${miningToggleLabel}
+                aria-label=${miningToggleLabel}
+              >
+                <ha-icon icon=${isMiningPaused ? "mdi:play" : "mdi:pause"}></ha-icon>
+              </button>`
+            : nothing}
           <button
             class="fan-gear-button"
             @click=${this.togglePoolMenu}
@@ -999,6 +1022,19 @@ export class BitcoinMinerCard extends LitElement {
     this.isPoolMenuOpen = !this.isPoolMenuOpen;
   }
 
+  private onMiningActiveToggle(event: Event): void {
+    event.stopPropagation();
+    const entityId = this.config?.mining_active_entity;
+    const state = entityId ? this.hass?.states?.[entityId]?.state : undefined;
+    if (!entityId || !this.hass?.callService || (state !== "on" && state !== "off")) {
+      return;
+    }
+
+    this.hass.callService("switch", state === "on" ? "turn_off" : "turn_on", {
+      entity_id: entityId
+    });
+  }
+
   private closePoolMenu(): void {
     this.isPoolMenuOpen = false;
   }
@@ -1074,6 +1110,8 @@ export class BitcoinMinerCard extends LitElement {
       --bm-fan-left: 73%;
       --bm-gear-top: 12.5%;
       --bm-gear-left: 92%;
+      --bm-pause-top: 12.5%;
+      --bm-pause-left: 84.5%;
       --bm-hashrate-left: 5.75%;
       --bm-hashrate-top: 75.65%;
       --bm-hashrate-width: 69%;
@@ -1231,6 +1269,38 @@ export class BitcoinMinerCard extends LitElement {
     .fan-gear-button:hover {
       opacity: 0.86;
       transform: translate(-50%, -50%) scale(1.05);
+    }
+
+    .mining-toggle-button {
+      all: unset;
+      position: absolute;
+      left: var(--bm-pause-left);
+      top: var(--bm-pause-top);
+      width: clamp(2.2rem, 7cqw, 3.9rem);
+      height: clamp(2.2rem, 7cqw, 3.9rem);
+      display: inline-grid;
+      place-items: center;
+      color: #9ffbff;
+      --mdc-icon-size: clamp(1.7rem, 5.6cqw, 3rem);
+      cursor: pointer;
+      pointer-events: auto;
+      transform: translate(-50%, -50%);
+      transition: transform 0.18s ease, opacity 0.18s ease, color 0.18s ease;
+      z-index: 22;
+    }
+
+    .mining-toggle-button.is-paused {
+      color: #ff8c00;
+    }
+
+    .mining-toggle-button:hover {
+      opacity: 0.86;
+      transform: translate(-50%, -50%) scale(1.05);
+    }
+
+    .mining-toggle-button[disabled] {
+      opacity: 0.4;
+      cursor: default;
     }
 
     .sun-ticker {
@@ -1542,6 +1612,8 @@ export class BitcoinMinerCard extends LitElement {
         --bm-fan-left: 71.5%;
         --bm-gear-left: 93%;
         --bm-gear-top: 12.8%;
+        --bm-pause-left: 83.5%;
+        --bm-pause-top: 12.8%;
       }
 
       .fan-indicator {
@@ -1574,6 +1646,13 @@ export class BitcoinMinerCard extends LitElement {
         color: #9ffbff;
         text-shadow: none;
         opacity: 1;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .mining-toggle-button {
+        width: clamp(1.9rem, 6cqw, 3.4rem);
+        height: clamp(1.9rem, 6cqw, 3.4rem);
+        --mdc-icon-size: clamp(1.5rem, 4.8cqw, 2.6rem);
         -webkit-tap-highlight-color: transparent;
       }
 

@@ -40,7 +40,7 @@ Version 1.2.0 adds Goldshell Byte support with dual-algorithm ALEO and LTC monit
 | Overheat threshold sliders per miner or per Goldshell board | ✅ ACTIVE |
 | Overheated status outputs for miner-level automation | ✅ ACTIVE |
 | Goldshell Byte ALEO and LTC board separation | ✅ ACTIVE |
-| Goldshell idle mode switch and power mode select | ✅ ACTIVE |
+| Goldshell Mining Active switch and power mode select | ✅ ACTIVE |
 | Companion-ready entity model for Bitcoin Miner Card dashboards | ✅ ACTIVE |
 | One-touch pool selection for up to three predefined pools | ✅ ACTIVE |
 | Bundled Bitcoin Miner Card auto-registered on install | ✅ ACTIVE |
@@ -120,7 +120,7 @@ Add each miner as its own config entry. Once your miners are online, add one fle
 | Thermal thresholds | Separate ALEO and LTC overheat sliders |
 | Fan telemetry | Separate fan RPM and percentage-based fan speed sensors |
 | Pool handling | Monitoring only, no writable pool service |
-| Device controls | Idle mode switch and shared power mode select |
+| Device controls | Mining Active switch (off pauses via idle mode) and shared power mode select |
 
 ### Fleet entities
 
