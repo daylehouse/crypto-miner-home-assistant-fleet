@@ -1,6 +1,7 @@
 import { css, html, LitElement, nothing } from "lit";
 import type { PropertyValues } from "lit";
 import { styleMap } from "lit/directives/style-map.js";
+import { live } from "lit/directives/live.js";
 import type { ChartConfiguration } from "chart.js";
 import Chart from "chart.js/auto";
 import { customElement, property, state } from "lit/decorators.js";
@@ -422,6 +423,11 @@ export class BitcoinMinerCard extends LitElement {
     const miningPools = this.getMiningPoolOptionsFromSelectEntity();
     const hasMiningPools = miningPools.length > 0;
     const activeMiningPool = this.getActiveMiningPool(miningPools);
+    const livePoolUrl = this.normalizeForDisplay(poolUrl.value);
+    const unmatchedPoolLabel =
+      livePoolUrl === "--"
+        ? "Unknown pool"
+        : `${livePoolUrl}:${this.normalizeForDisplay(poolPort.value)}`;
     const tickerText = [
       `POOL URL: ${this.normalizeForDisplay(poolUrl.value)}`,
       `POOL PORT: ${this.normalizeForDisplay(poolPort.value)}`,
@@ -500,14 +506,17 @@ export class BitcoinMinerCard extends LitElement {
             <select
               id="pool-select"
               class="pool-menu-select"
-              .value=${activeMiningPool}
               ?disabled=${!hasMiningPools}
               @change=${this.onMiningPoolChange}
             >
               ${hasMiningPools
-                ? miningPools.map(
-                    (pool) => html`<option value=${pool}>${pool}</option>`
-                  )
+                ? html`${activeMiningPool === ""
+                      ? html`<option value="" disabled .selected=${live(true)}>${unmatchedPoolLabel}</option>`
+                      : nothing}
+                    ${miningPools.map(
+                      (pool) =>
+                        html`<option value=${pool} .selected=${live(pool === activeMiningPool)}>${pool}</option>`
+                    )}`
                 : html`<option value="">No pools configured</option>`}
             </select>
           </div>
@@ -1151,7 +1160,7 @@ export class BitcoinMinerCard extends LitElement {
       return currentState;
     }
 
-    return miningPools[0];
+    return "";
   }
 
   static styles = css`
@@ -1168,7 +1177,7 @@ export class BitcoinMinerCard extends LitElement {
       --bm-gear-top: 12.5%;
       --bm-gear-left: 92%;
       --bm-pause-top: 12.5%;
-      --bm-pause-left: 84.5%;
+      --bm-pause-left: 81%;
       --bm-hashrate-left: 5.75%;
       --bm-hashrate-top: 75.65%;
       --bm-hashrate-width: 69%;
@@ -1669,7 +1678,7 @@ export class BitcoinMinerCard extends LitElement {
         --bm-fan-left: calc(62.25% + clamp(0.86rem, 3.02cqw, 1.3rem) + 0.28rem);
         --bm-gear-left: 93%;
         --bm-gear-top: 12.8%;
-        --bm-pause-left: 83.5%;
+        --bm-pause-left: 81%;
         --bm-pause-top: 12.8%;
       }
 
