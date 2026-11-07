@@ -475,6 +475,7 @@ export class BitcoinMinerCard extends LitElement {
             style="position:absolute; left:5.75%; top:20.5%; width:56.5%; height:46.8%; background:transparent; z-index:10; border:none;"
           ></canvas>
           <div class="title-value">${title}</div>
+          <div class="top-controls">
           <div class="fan-indicator">
             <span class="fan-icon" style=${styleMap(fanSpinStyles)} aria-hidden="true"></span>
             <span class="fan-value">${fanDisplayValue}</span>
@@ -507,6 +508,7 @@ export class BitcoinMinerCard extends LitElement {
           >
             ⚙︎
           </button>
+          </div>
           ${hasDiffStats && !isOverheat ? html`
           <div class="diff-rotator" aria-live="polite" aria-label="Best difficulty scores">
             ${this.config.all_time_best_difficulty_entity ? html`
@@ -1234,6 +1236,10 @@ export class BitcoinMinerCard extends LitElement {
 
   static styles = css`
     :host {
+      display: block;
+      position: relative;
+      z-index: 0;
+      isolation: isolate;
       --bm-danger: #ff8b3d;
       --bm-text: #ffe9fa;
       --bm-font-stack: "Bitcoin Miner Alien Local", "Bitcoin Miner Alien", -apple-system,
@@ -1241,12 +1247,12 @@ export class BitcoinMinerCard extends LitElement {
       --bm-title-left: 7%;
       --bm-title-top: 11%;
       --bm-title-width: 47%;
-      --bm-fan-top: 12.5%;
-      --bm-fan-left: calc(62.25% + clamp(0.99rem, 3.28cqw, 1.84rem) + 0.5rem);
-      --bm-gear-top: 12.5%;
-      --bm-gear-left: 92%;
-      --bm-pause-top: 12.5%;
-      --bm-pause-left: 81%;
+      --bm-ctl-top: 12.5%;
+      --bm-ctl-left: 62.25%;
+      --bm-ctl-right: 3%;
+      --bm-ctl-d: clamp(1.4rem, 4.6cqw, 2.5rem);
+      --bm-ctl-box: calc(var(--bm-ctl-d) * 1.6);
+      --bm-ctl-text: clamp(1.05rem, 3.1cqw, 1.7rem);
       --bm-hashrate-left: 5.75%;
       --bm-hashrate-top: 75.65%;
       --bm-hashrate-width: 69%;
@@ -1270,6 +1276,8 @@ export class BitcoinMinerCard extends LitElement {
     }
 
     ha-card {
+      position: relative;
+      isolation: isolate;
       overflow: hidden;
       border-radius: 24px;
       background: #090615;
@@ -1281,6 +1289,7 @@ export class BitcoinMinerCard extends LitElement {
 
     .stage {
       position: relative;
+      isolation: isolate;
       width: 100%;
       aspect-ratio: 3 / 2;
       background-size: 100% 100%;
@@ -1319,18 +1328,30 @@ export class BitcoinMinerCard extends LitElement {
       text-shadow: none;
     }
 
-    .fan-indicator {
+    .top-controls {
       position: absolute;
-      left: var(--bm-fan-left);
-      top: var(--bm-fan-top);
-      transform: translate(0, -50%);
+      left: var(--bm-ctl-left);
+      right: var(--bm-ctl-right);
+      top: var(--bm-ctl-top);
+      transform: translateY(-50%);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.25rem;
+      pointer-events: none;
+      z-index: 22;
+    }
+
+    .top-controls > * {
+      pointer-events: auto;
+    }
+
+    .fan-indicator {
       display: inline-flex;
       align-items: center;
-      gap: 0;
+      gap: 0.4rem;
       color: #9ffbff;
-      pointer-events: auto;
-      max-width: 24%;
-      z-index: 22;
+      flex: 0 0 auto;
     }
 
     .fan-icon,
@@ -1339,8 +1360,9 @@ export class BitcoinMinerCard extends LitElement {
     }
 
     .fan-icon {
-      width: clamp(0.99rem, 3.28cqw, 1.84rem);
-      height: clamp(0.99rem, 3.28cqw, 1.84rem);
+      width: var(--bm-ctl-d);
+      height: var(--bm-ctl-d);
+      box-sizing: border-box;
       border-radius: 50%;
       border: 2px solid #fffbfa;
       background: conic-gradient(
@@ -1355,13 +1377,11 @@ export class BitcoinMinerCard extends LitElement {
       );
       animation: fanSpin 1s linear infinite;
       flex: 0 0 auto;
-      margin-top: -0.15rem;
-      margin-right: 0.5rem;
-      margin-left: calc(-1 * (clamp(0.99rem, 3.28cqw, 1.84rem) + 0.5rem));
     }
 
     .fan-value {
-      font-size: clamp(1.22rem, 3.08cqw, 1.79rem);
+      font-size: var(--bm-ctl-text);
+      min-width: 3em;
       font-weight: 700;
       line-height: 1;
       white-space: nowrap;
@@ -1372,11 +1392,9 @@ export class BitcoinMinerCard extends LitElement {
 
     .fan-gear-button {
       all: unset;
-      position: absolute;
-      left: var(--bm-gear-left);
-      top: var(--bm-gear-top);
-      width: clamp(2.62rem, 8.7cqw, 4.88rem);
-      height: clamp(2.62rem, 8.7cqw, 4.88rem);
+      flex: 0 0 auto;
+      width: var(--bm-ctl-box);
+      height: var(--bm-ctl-box);
       display: inline-grid;
       place-items: center;
       padding: 0;
@@ -1392,34 +1410,30 @@ export class BitcoinMinerCard extends LitElement {
       color: #9ffbff;
       font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "Apple Symbols", sans-serif;
       font-variant-emoji: text;
-      font-size: clamp(2.23rem, 6.95cqw, 3.82rem);
+      font-size: calc(var(--bm-ctl-d) * 1.25);
       line-height: 1;
       cursor: pointer;
       pointer-events: auto;
-      transform: translate(-50%, -50%);
       transition: transform 0.18s ease, opacity 0.18s ease;
       z-index: 22;
     }
 
     .fan-gear-button:hover {
       opacity: 0.86;
-      transform: translate(-50%, -50%) scale(1.05);
+      transform: scale(1.05);
     }
 
     .mining-toggle-button {
       all: unset;
-      position: absolute;
-      left: var(--bm-pause-left);
-      top: var(--bm-pause-top);
-      width: clamp(2.2rem, 7cqw, 3.9rem);
-      height: clamp(2.2rem, 7cqw, 3.9rem);
+      flex: 0 0 auto;
+      width: var(--bm-ctl-box);
+      height: var(--bm-ctl-box);
       display: inline-grid;
       place-items: center;
       color: #9ffbff;
-      --mdc-icon-size: clamp(1.7rem, 5.6cqw, 3rem);
+      --mdc-icon-size: calc(var(--bm-ctl-d) * 1.5);
       cursor: pointer;
       pointer-events: auto;
-      transform: translate(-50%, -50%);
       transition: transform 0.18s ease, opacity 0.18s ease, color 0.18s ease;
       z-index: 22;
     }
@@ -1430,7 +1444,7 @@ export class BitcoinMinerCard extends LitElement {
 
     .mining-toggle-button:hover {
       opacity: 0.86;
-      transform: translate(-50%, -50%) scale(1.05);
+      transform: scale(1.05);
     }
 
     .mining-toggle-button[disabled] {
@@ -1744,27 +1758,19 @@ export class BitcoinMinerCard extends LitElement {
 
     @media (max-width: 540px) {
       :host {
-        --bm-fan-left: calc(62.25% + clamp(0.86rem, 3.02cqw, 1.3rem) + 0.28rem);
-        --bm-gear-left: 93%;
-        --bm-gear-top: 12.8%;
-        --bm-pause-left: 81%;
-        --bm-pause-top: 12.8%;
+        --bm-ctl-top: 12.8%;
+        --bm-ctl-right: 2%;
+        --bm-ctl-d: clamp(1.15rem, 4.2cqw, 1.9rem);
+        --bm-ctl-box: calc(var(--bm-ctl-d) * 1.5);
+        --bm-ctl-text: clamp(0.8rem, 2.8cqw, 1.2rem);
       }
 
       .fan-indicator {
-        gap: 0;
-      }
-
-      .fan-icon {
-        width: clamp(0.86rem, 3.02cqw, 1.3rem);
-        height: clamp(0.86rem, 3.02cqw, 1.3rem);
-        margin-top: -0.08rem;
-        margin-right: 0.28rem;
-        margin-left: calc(-1 * (clamp(0.86rem, 3.02cqw, 1.3rem) + 0.28rem));
+        gap: 0.25rem;
       }
 
       .fan-value {
-        font-size: clamp(0.83rem, 2.86cqw, 1.23rem);
+        min-width: 2.8em;
       }
 
       .pool-menu {
@@ -1775,9 +1781,6 @@ export class BitcoinMinerCard extends LitElement {
       }
 
       .fan-gear-button {
-        width: clamp(2.1rem, 6.96cqw, 3.9rem);
-        height: clamp(2.1rem, 6.96cqw, 3.9rem);
-        font-size: clamp(1.78rem, 5.56cqw, 3.06rem);
         color: #9ffbff;
         text-shadow: none;
         opacity: 1;
@@ -1785,9 +1788,6 @@ export class BitcoinMinerCard extends LitElement {
       }
 
       .mining-toggle-button {
-        width: clamp(1.9rem, 6cqw, 3.4rem);
-        height: clamp(1.9rem, 6cqw, 3.4rem);
-        --mdc-icon-size: clamp(1.5rem, 4.8cqw, 2.6rem);
         -webkit-tap-highlight-color: transparent;
       }
 
