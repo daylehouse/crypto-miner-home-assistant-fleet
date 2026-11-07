@@ -155,6 +155,8 @@ export class BitcoinMinerCard extends LitElement {
 
   @state() private isPoolMenuOpen = false;
 
+  @state() private isWorkModeMenuOpen = false;
+
   private static chartFontDefaultsApplied = false;
 
   public connectedCallback(): void {
@@ -440,6 +442,7 @@ export class BitcoinMinerCard extends LitElement {
       pendingMode && pendingMode.value !== workModeActual && Date.now() - pendingMode.since < 20000
         ? pendingMode.value
         : workModeActual;
+    const showWorkMode = !miningActiveEntityId && !!workModeEntityId && workModeOptions.length > 0;
     const miningPools = this.getMiningPoolOptionsFromSelectEntity();
     const hasMiningPools = miningPools.length > 0;
     const activeMiningPool = this.getActiveMiningPool(miningPools);
@@ -486,21 +489,15 @@ export class BitcoinMinerCard extends LitElement {
               >
                 <ha-icon icon=${isMiningPaused ? "mdi:play" : "mdi:pause"}></ha-icon>
               </button>`
-            : workModeEntityId && workModeOptions.length > 0
-              ? html`<select
-                  class="work-mode-select"
-                  title="Work mode"
-                  aria-label="Work mode"
-                  @change=${this.onWorkModeChange}
+            : showWorkMode
+              ? html`<button
+                  class="mining-toggle-button"
+                  @click=${this.toggleWorkModeMenu}
+                  title=${`Work mode: ${this.normalizeForDisplay(workModeCurrent)}`}
+                  aria-label="Open work mode menu"
                 >
-                  ${workModeOptions.includes(workModeCurrent)
-                    ? nothing
-                    : html`<option value="" disabled .selected=${live(true)}>Mode</option>`}
-                  ${workModeOptions.map(
-                    (option) =>
-                      html`<option value=${option} .selected=${live(option === workModeCurrent)}>${option}</option>`
-                  )}
-                </select>`
+                  <ha-icon icon="mdi:tune-variant"></ha-icon>
+                </button>`
               : nothing}
           <button
             class="fan-gear-button"
@@ -529,11 +526,11 @@ export class BitcoinMinerCard extends LitElement {
               <span aria-hidden="true">${tickerText}</span>
             </div>
           </div>
-          ${this.isPoolMenuOpen
+          ${this.isPoolMenuOpen || this.isWorkModeMenuOpen
             ? html`<button
                 class="pool-menu-backdrop"
                 @click=${this.closePoolMenu}
-                aria-label="Close mining pool menu"
+                aria-label="Close menu"
               ></button>`
             : nothing}
           <div class="pool-menu ${this.isPoolMenuOpen ? "is-open" : ""}" @click=${this.onPoolMenuClick}>
@@ -555,6 +552,24 @@ export class BitcoinMinerCard extends LitElement {
                 : html`<option value="">No pools configured</option>`}
             </select>
           </div>
+          ${showWorkMode
+            ? html`<div class="pool-menu ${this.isWorkModeMenuOpen ? "is-open" : ""}" @click=${this.onPoolMenuClick}>
+                <label class="pool-menu-label" for="work-mode-select">Work Mode</label>
+                <select
+                  id="work-mode-select"
+                  class="pool-menu-select"
+                  @change=${this.onWorkModeChange}
+                >
+                  ${workModeOptions.includes(workModeCurrent)
+                    ? nothing
+                    : html`<option value="" disabled .selected=${live(true)}>Unknown</option>`}
+                  ${workModeOptions.map(
+                    (option) =>
+                      html`<option value=${option} .selected=${live(option === workModeCurrent)}>${option}</option>`
+                  )}
+                </select>
+              </div>`
+            : nothing}
           <div class="hashrate-row">
             <span class="hashrate-value">${this.formatState(hashrate)}</span>
           </div>
@@ -1121,6 +1136,13 @@ export class BitcoinMinerCard extends LitElement {
   private togglePoolMenu(event: Event): void {
     event.stopPropagation();
     this.isPoolMenuOpen = !this.isPoolMenuOpen;
+    this.isWorkModeMenuOpen = false;
+  }
+
+  private toggleWorkModeMenu(event: Event): void {
+    event.stopPropagation();
+    this.isWorkModeMenuOpen = !this.isWorkModeMenuOpen;
+    this.isPoolMenuOpen = false;
   }
 
   private onWorkModeChange(event: Event): void {
@@ -1149,6 +1171,7 @@ export class BitcoinMinerCard extends LitElement {
 
   private closePoolMenu(): void {
     this.isPoolMenuOpen = false;
+    this.isWorkModeMenuOpen = false;
   }
 
   private onPoolMenuClick(event: Event): void {
@@ -1413,27 +1436,6 @@ export class BitcoinMinerCard extends LitElement {
     .mining-toggle-button[disabled] {
       opacity: 0.4;
       cursor: default;
-    }
-
-    .work-mode-select {
-      position: absolute;
-      left: var(--bm-pause-left);
-      top: var(--bm-pause-top);
-      width: clamp(3.6rem, 11cqw, 6.5rem);
-      transform: translate(-50%, -50%);
-      border: 1px solid rgba(159, 251, 255, 0.65);
-      border-radius: 0.4rem;
-      background: rgba(8, 20, 41, 0.85);
-      color: #ffffff;
-      color-scheme: dark;
-      font-family: var(--bm-font-stack);
-      font-size: clamp(0.8rem, 2.4cqw, 1.15rem);
-      font-weight: 700;
-      padding: 0.25rem 0.3rem;
-      outline: none;
-      cursor: pointer;
-      pointer-events: auto;
-      z-index: 22;
     }
 
     .sun-ticker {
@@ -1787,12 +1789,6 @@ export class BitcoinMinerCard extends LitElement {
         height: clamp(1.9rem, 6cqw, 3.4rem);
         --mdc-icon-size: clamp(1.5rem, 4.8cqw, 2.6rem);
         -webkit-tap-highlight-color: transparent;
-      }
-
-      .work-mode-select {
-        width: clamp(3.2rem, 15cqw, 5rem);
-        font-size: clamp(0.62rem, 2.1cqw, 0.9rem);
-        padding: 0.18rem 0.2rem;
       }
 
       .diff-rotator {

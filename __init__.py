@@ -38,6 +38,7 @@ from .const import (
     ENTRY_TYPE_FLEET,
     ENTRY_TYPE_MINER,
     MINER_TYPE_BITAXE,
+    MINER_TYPE_GOLDSHELL,
     MINER_TYPE_NERDAXE,
     PLATFORMS_FLEET,
     PLATFORMS_MINER,
@@ -305,27 +306,42 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
-# Card config field -> entity unique-ID key suffix.
-CARD_ENTITY_KEYS: dict[str, str] = {
-    "title_entity": "hostname",
-    "miner_name_entity": "ipv4_address",
-    "hashrate_entity": "hashrate",
-    "temperature_entity": "temp_asic",
-    "vr_temp_entity": "temp_vr",
-    "overheat_entity": "vr_overheated",
-    "power_entity": "power",
-    "model_entity": "device_model",
-    "fan_entity": "fan_speed",
-    "mining_active_entity": "mining_active",
-    "work_mode_entity": "work_mode",
-    "mining_pool_select_entity": "active_pool",
-    "pool_url_entity": "pool_url",
-    "pool_port_entity": "pool_port",
-    "shares_accepted_entity": "shares_accepted",
-    "shares_rejected_entity": "shares_rejected",
-    "all_time_best_difficulty_entity": "best_diff",
-    "session_best_difficulty_entity": "best_session_diff",
+# Card config field -> entity unique-ID key suffixes, first match wins.
+CARD_ENTITY_KEYS: dict[str, tuple[str, ...]] = {
+    "title_entity": ("hostname",),
+    "miner_name_entity": ("ipv4_address",),
+    "hashrate_entity": ("hashrate",),
+    "temperature_entity": ("temp_asic", "temp_1"),
+    "vr_temp_entity": ("temp_vr", "temp_2"),
+    "overheat_entity": ("vr_overheated", "overheated"),
+    "power_entity": ("power",),
+    "model_entity": ("device_model",),
+    "fan_entity": ("fan_speed",),
+    "mining_active_entity": ("mining_active",),
+    "work_mode_entity": ("work_mode",),
+    "mining_pool_select_entity": ("active_pool",),
+    "pool_url_entity": ("pool_url",),
+    "pool_port_entity": ("pool_port",),
+    "shares_accepted_entity": ("shares_accepted",),
+    "shares_rejected_entity": ("shares_rejected",),
+    "all_time_best_difficulty_entity": ("best_diff",),
+    "session_best_difficulty_entity": ("best_session_diff",),
 }
+
+
+def _entities_by_key(hass: HomeAssistant, device: dr.DeviceEntry) -> dict[str, str]:
+    """Map entity unique-ID keys to entity IDs for one device."""
+    identifier = next((ident[1] for ident in device.identifiers if ident[0] == DOMAIN), None)
+    if identifier is None:
+        return {}
+
+    # Unique IDs are f"{miner_type}_{slug}_{key}", matching the device identifier.
+    prefix = f"{identifier}_"
+    return {
+        entry.unique_id[len(prefix):]: entry.entity_id
+        for entry in er.async_entries_for_device(er.async_get(hass), device.id)
+        if entry.platform == DOMAIN and (entry.unique_id or "").startswith(prefix)
+    }
 
 
 def _register_card_api(hass: HomeAssistant) -> None:
@@ -342,26 +358,26 @@ def _register_card_api(hass: HomeAssistant) -> None:
         )
         @callback
         def ws_card_entities(hass, connection, msg):
-            device = dr.async_get(hass).async_get(msg["device_id"])
-            identifier = next(
-                (ident[1] for ident in (device.identifiers if device else ()) if ident[0] == DOMAIN),
-                None,
-            )
-            if identifier is None:
+            registry = dr.async_get(hass)
+            device = registry.async_get(msg["device_id"])
+            if device is None:
                 connection.send_result(msg["id"], {})
                 return
 
-            # Unique IDs are f"{miner_type}_{slug}_{key}", matching the device identifier.
-            prefix = f"{identifier}_"
-            by_key = {
-                entry.unique_id[len(prefix):]: entry.entity_id
-                for entry in er.async_entries_for_device(er.async_get(hass), device.id)
-                if entry.platform == DOMAIN and (entry.unique_id or "").startswith(prefix)
-            }
-            connection.send_result(
-                msg["id"],
-                {field: by_key[key] for field, key in CARD_ENTITY_KEYS.items() if key in by_key},
-            )
+            by_key = _entities_by_key(hass, device)
+            # Goldshell card devices share chassis-level entities (IP, model, Mining Active).
+            parent = registry.async_get(device.via_device_id) if device.via_device_id else None
+            if parent is not None:
+                for key, entity_id in _entities_by_key(hass, parent).items():
+                    by_key.setdefault(key, entity_id)
+
+            resolved: dict[str, str] = {}
+            for field, keys in CARD_ENTITY_KEYS.items():
+                for key in keys:
+                    if key in by_key:
+                        resolved[field] = by_key[key]
+                        break
+            connection.send_result(msg["id"], resolved)
 
         websocket_api.async_register_command(hass, ws_card_entities)
     except Exception as err:  # card helpers must never break setup
@@ -668,6 +684,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register services (only once per domain)
     if not hass.services.has_service(DOMAIN, "set_pool"):
         async_register_services(hass)
+
+    # Card devices reference the chassis through via_device, so create it first.
+    if miner_type == MINER_TYPE_GOLDSHELL:
+        dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, f"goldshell_{device_slug}")},
+            name=device_name,
+            manufacturer="Goldshell",
+            model="Goldshell Byte",
+        )
 
     # Load platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_MINER)
