@@ -78,6 +78,7 @@ interface BitcoinMinerCardConfig {
   overheat_entity?: string;
   fan_entity?: string;
   mining_active_entity?: string;
+  work_mode_entity?: string;
   mining_pool_select_entity?: string;
   pool_url_entity?: string;
   pool_port_entity?: string;
@@ -137,6 +138,8 @@ export class BitcoinMinerCard extends LitElement {
 
   private autoEntitiesDeviceId = "";
 
+  private pendingWorkMode?: { value: string; since: number };
+
   private chart: Chart | null = null;
 
   private chartData: AlignedChartData = {
@@ -194,6 +197,7 @@ export class BitcoinMinerCard extends LitElement {
         { name: "overheat_entity", selector: { entity: {} } },
         { name: "fan_entity", selector: { entity: {} } },
         { name: "mining_active_entity", selector: { entity: { domain: "switch" } } },
+        { name: "work_mode_entity", selector: { entity: { domain: "select" } } },
         { name: "mining_pool_select_entity", selector: { entity: {} } },
         { name: "pool_url_entity", selector: { entity: {} } },
         { name: "pool_port_entity", selector: { entity: {} } },
@@ -240,6 +244,8 @@ export class BitcoinMinerCard extends LitElement {
             return "Fan Entity";
           case "mining_active_entity":
             return "Mining Active Switch Entity";
+          case "work_mode_entity":
+            return "Work Mode Select Entity";
           case "mining_pool_select_entity":
             return "Mining Pool Select Entity";
           case "pool_url_entity":
@@ -282,6 +288,8 @@ export class BitcoinMinerCard extends LitElement {
             return "Fan speed sensor shown as percent.";
           case "mining_active_entity":
             return "Mining Active switch for this miner; the pause button toggles it.";
+          case "work_mode_entity":
+            return "Work mode select (e.g. Avalon). Shown in the pause button's place when no Mining Active switch is set.";
           case "mining_pool_select_entity":
             return "Home Assistant select entity used by the popup menu for pool selection.";
           case "pool_url_entity":
@@ -420,6 +428,18 @@ export class BitcoinMinerCard extends LitElement {
       : undefined;
     const isMiningPaused = miningActiveState === "off";
     const miningToggleLabel = isMiningPaused ? "Resume mining" : "Pause mining";
+    const workModeEntityId = this.config.work_mode_entity;
+    const workModeStateObj = workModeEntityId ? this.hass?.states?.[workModeEntityId] : undefined;
+    const workModeOptions = Array.isArray(workModeStateObj?.attributes?.options)
+      ? (workModeStateObj?.attributes?.options as unknown[]).map((option) => String(option))
+      : [];
+    const workModeActual = workModeStateObj?.state ?? "";
+    // Hold the picked mode until the miner reports it so the dropdown doesn't bounce.
+    const pendingMode = this.pendingWorkMode;
+    const workModeCurrent =
+      pendingMode && pendingMode.value !== workModeActual && Date.now() - pendingMode.since < 20000
+        ? pendingMode.value
+        : workModeActual;
     const miningPools = this.getMiningPoolOptionsFromSelectEntity();
     const hasMiningPools = miningPools.length > 0;
     const activeMiningPool = this.getActiveMiningPool(miningPools);
@@ -466,7 +486,22 @@ export class BitcoinMinerCard extends LitElement {
               >
                 <ha-icon icon=${isMiningPaused ? "mdi:play" : "mdi:pause"}></ha-icon>
               </button>`
-            : nothing}
+            : workModeEntityId && workModeOptions.length > 0
+              ? html`<select
+                  class="work-mode-select"
+                  title="Work mode"
+                  aria-label="Work mode"
+                  @change=${this.onWorkModeChange}
+                >
+                  ${workModeOptions.includes(workModeCurrent)
+                    ? nothing
+                    : html`<option value="" disabled .selected=${live(true)}>Mode</option>`}
+                  ${workModeOptions.map(
+                    (option) =>
+                      html`<option value=${option} .selected=${live(option === workModeCurrent)}>${option}</option>`
+                  )}
+                </select>`
+              : nothing}
           <button
             class="fan-gear-button"
             @click=${this.togglePoolMenu}
@@ -1088,6 +1123,17 @@ export class BitcoinMinerCard extends LitElement {
     this.isPoolMenuOpen = !this.isPoolMenuOpen;
   }
 
+  private onWorkModeChange(event: Event): void {
+    const option = (event.target as HTMLSelectElement).value;
+    const entityId = this.config?.work_mode_entity;
+    if (!entityId || !option || !this.hass?.callService) {
+      return;
+    }
+
+    this.pendingWorkMode = { value: option, since: Date.now() };
+    this.hass.callService("select", "select_option", { entity_id: entityId, option });
+  }
+
   private onMiningActiveToggle(event: Event): void {
     event.stopPropagation();
     const entityId = this.config?.mining_active_entity;
@@ -1367,6 +1413,27 @@ export class BitcoinMinerCard extends LitElement {
     .mining-toggle-button[disabled] {
       opacity: 0.4;
       cursor: default;
+    }
+
+    .work-mode-select {
+      position: absolute;
+      left: var(--bm-pause-left);
+      top: var(--bm-pause-top);
+      width: clamp(3.6rem, 11cqw, 6.5rem);
+      transform: translate(-50%, -50%);
+      border: 1px solid rgba(159, 251, 255, 0.65);
+      border-radius: 0.4rem;
+      background: rgba(8, 20, 41, 0.85);
+      color: #ffffff;
+      color-scheme: dark;
+      font-family: var(--bm-font-stack);
+      font-size: clamp(0.8rem, 2.4cqw, 1.15rem);
+      font-weight: 700;
+      padding: 0.25rem 0.3rem;
+      outline: none;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 22;
     }
 
     .sun-ticker {
@@ -1720,6 +1787,12 @@ export class BitcoinMinerCard extends LitElement {
         height: clamp(1.9rem, 6cqw, 3.4rem);
         --mdc-icon-size: clamp(1.5rem, 4.8cqw, 2.6rem);
         -webkit-tap-highlight-color: transparent;
+      }
+
+      .work-mode-select {
+        width: clamp(3.2rem, 15cqw, 5rem);
+        font-size: clamp(0.62rem, 2.1cqw, 0.9rem);
+        padding: 0.18rem 0.2rem;
       }
 
       .diff-rotator {

@@ -317,6 +317,7 @@ CARD_ENTITY_KEYS: dict[str, str] = {
     "model_entity": "device_model",
     "fan_entity": "fan_speed",
     "mining_active_entity": "mining_active",
+    "work_mode_entity": "work_mode",
     "mining_pool_select_entity": "active_pool",
     "pool_url_entity": "pool_url",
     "pool_port_entity": "pool_port",
