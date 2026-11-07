@@ -718,7 +718,7 @@ const Yr={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:_},qr=(t=Yr
     @media (max-width: 540px) {
       :host {
         --bm-ctl-top: 12.8%;
-        --bm-ctl-right: 2%;
+        --bm-ctl-right: 5.5%;
         --bm-ctl-d: clamp(1.15rem, 4.2cqw, 1.9rem);
         --bm-ctl-box: calc(var(--bm-ctl-d) * 1.5);
         --bm-ctl-text: clamp(0.8rem, 2.8cqw, 1.2rem);
