@@ -105,7 +105,7 @@ const Yr={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:_},qr=(t=Yr
               >
                 <ha-icon icon=${P?"mdi:play":"mdi:pause"}></ha-icon>
               </button>`:R?W`<button
-                  class="mining-toggle-button"
+                  class="mining-toggle-button is-work-mode"
                   @click=${this.toggleWorkModeMenu}
                   title=${`Work mode: ${this.normalizeForDisplay(L)}`}
                   aria-label="Open work mode menu"
@@ -365,7 +365,7 @@ const Yr={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:_},qr=(t=Yr
       color: #9ffbff;
       font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "Apple Symbols", sans-serif;
       font-variant-emoji: text;
-      font-size: calc(var(--bm-ctl-d) * 1.25);
+      font-size: calc(var(--bm-ctl-d) * 1.5);
       line-height: 1;
       cursor: pointer;
       pointer-events: auto;
@@ -386,11 +386,15 @@ const Yr={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:_},qr=(t=Yr
       display: inline-grid;
       place-items: center;
       color: #9ffbff;
-      --mdc-icon-size: calc(var(--bm-ctl-d) * 1.5);
+      --mdc-icon-size: calc(var(--bm-ctl-d) * 1.3);
       cursor: pointer;
       pointer-events: auto;
       transition: transform 0.18s ease, opacity 0.18s ease, color 0.18s ease;
       z-index: 22;
+    }
+
+    .mining-toggle-button.is-work-mode {
+      --mdc-icon-size: calc(var(--bm-ctl-d) * 1.1);
     }
 
     .mining-toggle-button.is-paused {
